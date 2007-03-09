@@ -16,6 +16,8 @@ Package.setup("1.0") {
 	translate(:lib, 'src/' => '')
 	translate(:bin, 'bin/' => '')
 	lib(*Dir["src/swiftcore/**/*.rb"])
+	lib("src/swiftcore/evented_mongrel.rb")
+	lib("src/swiftcore/swiftiplied_mongrel.rb")
 	ri(*Dir["src/swiftcore/**/*.rb"])
 	bin "bin/swiftiply.rb"
 
