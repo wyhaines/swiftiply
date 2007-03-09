@@ -1,6 +1,7 @@
 #!ruby
 
 require 'optparse'
+require 'yaml'
 
 begin
 	load_attempted ||= false
@@ -14,9 +15,122 @@ rescue LoadError => e
 	raise e
 end
 
-ClusterAddress = "127.0.0.1"
-ClusterPort = 8080
-BackendAddress = "127.0.0.1"
-BackendPort = 9080
+module Swiftcore
+	class SwiftiplyExec
+		Ccluster_address = 'cluster_address'.freeze
+		Ccluster_port = 'cluster_port'.freeze
+		Cbackend_address = 'backend_address'.freeze
+		Cbackend_port = 'backend_port'.freeze
+		Cmap = 'map'.freeze
+		Cincoming = 'incoming'.freeze
+		Coutgoing = 'outgoing'.freeze
+		Ckeepalive = 'keepalive'.freeze
+		Cdaemonize = 'daemonize'.freeze
+		Curl = 'url'.freeze
+		Chost = 'host'.freeze
+		Cport = 'port'.freeze
+		Ctimeout = 'timeout'.freeze
 
-Swiftcore::Swiftiply.run(ClusterAddress,ClusterPort,BackendAddress,BackendPort)
+#####
+#
+# --cluster-address
+# --cluster-port
+# --config-file -c (default swiftiply.cnf)
+# --daemonize -d
+# 
+# Config file format (YAML):
+# 
+# cluster_address:
+# cluster_port:
+# daemonize:
+# map:
+#   - incoming:
+#     - 127.0.0.1:8080
+#     - foo.bar.com:8090
+#     url:
+#			keepalive:
+#			outgoing:
+# 
+#####
+		def self.parse_options(config = {})
+			OptionParser.new do |opts|
+				opts.banner = 'Usage: swiftiply.rb [options]'
+				opts.separator ''
+				opts.on('-c','--config CONFFILE',"The configuration file to read.") do |conf|
+					config = YAML.load(File.open(conf))
+					postprocess_config_load(config)
+				end
+				opts.on('--cluster-address [ADDRESS]',String,'The hostname/IP address that swiftiply will listen for connections on.') do |address|
+					config[Ccluster_address] = address
+				end
+				opts.on('--cluster-port [PORT]',Integer,'The port that swiftiply will listen for connections on.') do |port|
+					config[Ccluster_port] = port
+				end
+				opts.on('--backend-address [ADDRESS]',String,'The hostname/IP address that swiftiply will listen for backend connections on.') do |address|
+					config[Cbackend_address] = address
+				end
+				opts.on('--backend-port [PORT]',Integer,'The port that swiftiply will listen for backend connections on.') do |port|
+					config[Cbackend_port] = port
+				end
+				opts.on('-d','--daemonize [YN]',[:y,:yes,:n,:no],'Whether swiftiply should put itself into the background.') do |yn|
+					config[Cdaemonize] = yn.to_s =~ /^y/i
+					if config[Cdaemonize] and on_windows?
+						begin
+							load_attempted ||= false
+							require 'win32/process'
+						rescue LoadError
+							unless load_attempted
+								load_attempted = true
+								retry
+							end
+							puts "You appear to be on a Windows platform, but the win32/process library is not installed, so the process can not be backgrounded.  'gem install win32-process' or http://rubyforge.org/projects/win32utils"
+							exit
+						end
+					end
+				end
+				opts.on('-t','--timeout [SECONDS]',Integer,'The server unavailable timeout.  Defaults to 3 seconds.') do |timeout|
+					config[Ctimeout] = timeout
+				end
+				opts.on('-p','--print-config','Print the full configuration.') do
+					verify_config(config)
+					require 'pp'
+					pp config
+					exit
+				end
+
+			end.parse!
+			puts("Configuration failed validation; exiting.") && exit unless verify_config(config)
+			config
+		end
+
+		def self.postprocess_config_load(config)
+			config[Cmap] = [] unless Array === config[Cmap]
+			config[Ctimeout] ||= 3
+			config[Cmap].each do |m|
+				m[Ckeepalive] = true unless m.has_key?(Ckeepalive)
+				m[Ckeepalive] = !!m[Ckeepalive]
+				m[Coutgoing] = [m[Coutgoing]] unless Array == m[Coutgoing] and !m[Coutgoing].empty?
+				m[Cincoming] = [m[Cincoming]] unless Array == m[Cincoming] and !m[Cincoming].empty?
+			end
+		end
+
+		def self.verify_config(config)
+			if config[Cbackend_address] and config[Cbackend_port]
+				config[Cmap] << {Cincoming => nil, Curl => nil, Coutgoing => "#{config[Cbackend_address]}:#{config[Cbackend_port]}", Ckeepalive => true}
+			end
+			true
+		end
+
+		def self.run
+			config = parse_options
+			Swiftcore::Swiftiply.run(config)
+		end
+
+		def self.on_windows?
+			return @on_windows unless @on_windows.nil?
+      @on_windows = !![/mswin/i, /cygwin/i, /mingw/i, /bccwin/i, /wince/i].find {|p| RUBY_PLATFORM =~ p}
+		end
+	end
+end
+
+Swiftcore::SwiftiplyExec.run
