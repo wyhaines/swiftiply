@@ -1,5 +1,6 @@
 begin
 	load_attempted ||= false
+	require 'digest/sha2'
 	require 'eventmachine'
 rescue LoadError => e
 	unless load_attempted
@@ -35,6 +36,10 @@ module Swiftcore
 			@server_q = Hash.new {|h,k| h[k] = []}
 			@ctime = Time.now
 			@server_unavailable_timeout = 6
+			@id_map = {}
+			@reverse_id_map = {}
+			@incoming_map = {}
+			@demanding_clients = Hash.new {|h,k| h[k] = []}
 
 			class << self
 
@@ -54,6 +59,20 @@ module Swiftcore
 
 				def key=(val)
 					@key = val
+				end
+
+				def add_id(who,what)
+					@id_map[who] = what
+					@reverse_id_map[what] = who
+				end
+
+				def remove_id(who)
+					what = @id_map.delete(who)
+					@reverse_id_map.delete(what)
+				end
+
+				def add_incoming_mapping(hashcode,name)
+					@incoming_map[name] = hashcode
 				end
 
 				def default_name
@@ -83,7 +102,13 @@ module Swiftcore
 
 				def add_frontend_client clnt
 					clnt.create_time = @ctime
-					@client_q[clnt.name].unshift(clnt) unless match_client_to_server_now(clnt)
+					unless match_client_to_server_now(clnt)
+						if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
+							@demanding_clients[$1].unshift clnt
+						else
+							@client_q[clnt.name].unshift(clnt)
+						end
+					end
 				end
 
 				# Pushes a backend server into the queue of servers waiting for a
@@ -111,22 +136,29 @@ module Swiftcore
 				# waiting clients with waiting servers until the queue
 				# runs out of one or the other.  DEPRECATED
 
-				def match_clients_to_servers
-					while @server_q.first && @client_q.first
-						server = @server_q.pop
-						client = @client_q.pop
-						server.associate = client
-						client.associate = server
-						client.push
-					end
-				end
+				#def match_clients_to_servers
+				#	while @server_q.first && @client_q.first
+				#		server = @server_q.pop
+				#		client = @client_q.pop
+				#		server.associate = client
+				#		client.associate = server
+				#		client.push
+				#	end
+				#end
 
 				# Tries to match the client passed as an argument to a
 				# server.
 
 				def match_client_to_server_now(client)
-					if server = @server_q[client.name].pop
-						#server = @server_q[client.name].pop
+					sq = @server_q[@incoming_map[client.name]]
+					client.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
+					if client.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/ and sidx = sq.index(@reverse_id_map[$1])
+						server = sq.delete_at(sidx)
+						server.associate = client
+						client.associate = server
+						client.push
+						true
+					elsif server = sq.pop
 						server.associate = client
 						client.associate = server
 						client.push
@@ -140,11 +172,15 @@ module Swiftcore
 				# client.
 
 				def match_server_to_client_now(server)
-					if client = @client_q[server.name].pop
-						#client = @client_q[server.name].pop
+					if client = @demanding_clients[server.id].pop
 						server.associate = client
 						client.associate = server
-					client.push
+						client.push
+						true
+					elsif client = @client_q[server.name].pop
+						server.associate = client
+						client.associate = server
+						client.push
 						true
 					else
 						false
@@ -187,11 +223,14 @@ module Swiftcore
 		# to communicate between Swiftiply and the web browser clients.
 
 		class ClusterProtocol < EventMachine::Connection
+
 			attr_accessor :create_time, :associate, :name
 
+			Crn = "\r\n".freeze
 			Crnrn = "\r\n\r\n".freeze
 			Rrnrn = /\r\n\r\n/
 			R_colon = /:/
+			C_blank = ''.freeze
 
 			# Initialize the @data array, which is the temporary storage for blocks
 			# of data received from the web browser client, then invoke the superclass
@@ -200,24 +239,22 @@ module Swiftcore
 			def initialize *args
 				@data = []
 				@name = nil
+				@uri = nil
 				super
 			end
-
-			# Receive data from the web browser client, then immediately try to
-			# push it to a backend.
 
 			def receive_data data
 				@data.unshift data
 				if @name
 					push
 				else
-			#		if data =~ /^Host:\s*(.*)\s*$/
-			#			@name = $1.chomp.split(R_colon,2).first
+					data =~ /\s([^\s\?]*)/
+					@uri ||= $1
 					if data =~ /^Host:\s*([^\r\n:]*)/
 						@name = $1
 						ProxyBag.add_frontend_client self
 						push
-					elsif data =~ /\r\n\r\n/
+					elsif data.index(/\r\n\r\n/)
 						@name = ProxyBag.default_name
 						ProxyBag.add_frontend_client self
 						push
@@ -258,6 +295,11 @@ module Swiftcore
 			def unbind
 				ProxyBag.remove_client(self) unless @associate
 			end
+
+			def uri
+				@uri
+			end
+
 		end
 
 
@@ -266,7 +308,7 @@ module Swiftcore
 		# it is proxying to.
 
 		class BackendProtocol < EventMachine::Connection
-			attr_accessor :associate
+			attr_accessor :associate, :id
 
 			Crnrn = "\r\n\r\n".freeze
 			Rrnrn = /\r\n\r\n/
@@ -284,6 +326,7 @@ module Swiftcore
 
 			def post_init
 				setup
+				@initialized = nil
 				ProxyBag.add_server self
 			end
 
@@ -303,32 +346,42 @@ module Swiftcore
 			# allowing for greater throughput.
 
 			def receive_data data
+				unless @initialized
+					@id = data.slice!(0..11)
+					ProxyBag.add_id(self,@id)
+					@initialized = true
+				end
 				unless @headers_completed 
-					@headers_completed = true if data.index(Crnrn)
-					if @headers_completed
+					if data.index(Crnrn)
+						@headers_completed = true
 						h,d = data.split(Rrnrn)
 						@headers << h << Crnrn
-						@headers =~ /Content-Length:\s*(\d+)/
+						@headers =~ /Content-Length:\s*([^\r\n]+)/
 						@content_length = $1.to_i
 						@associate.send_data @headers
-						@associate.send_data d
-						@content_sent += d.length
+						#@associate.send_data d
+						#@content_sent += d.length
+						data = d
 					else
 						@headers << data
 					end
 				end
-	
-				if @headers_completed 
-					if @content_sent < @content_length
-						@associate.send_data data
-						@content_sent += data.length
-					else
+
+				if @headers_completed
+					@associate.send_data data
+					@content_sent += data.length
+					if @content_sent >= @content_length
 						@associate.close_connection_after_writing
 						@associate = nil
 						setup
 						ProxyBag.add_server self
 					end
 				end
+			rescue
+				@associate.close_connection_after_writing
+				@associate = nil
+				setup
+				ProxyBag.add_server self
 			end
 
 			# This is called when the backend disconnects from the proxy.
@@ -342,6 +395,7 @@ module Swiftcore
 				else
 					ProxyBag.remove_server(self)
 				end
+				ProxyBag.remove_id(self)
 			end
 
 			def self.bname=(val)
@@ -358,17 +412,26 @@ module Swiftcore
 		# clients and to update the Proxy's clock.
 
 		def self.run(config, key = nil)
+			existing_backends = {}
 			EventMachine.run do
 				EventMachine.start_server(config[Ccluster_address], config[Ccluster_port], ClusterProtocol)
 				config[Cmap].each do |m|
 					if m[Ckeepalive]
+						incoming_hash = Digest::SHA512.hexdigest(m[Cincoming].join('|'))
 						m[Cincoming].each do |p|
+							ProxyBag.add_incoming_mapping(incoming_hash,p)
 							m[Coutgoing].each do |o|
-								backend_class = Class.new(BackendProtocol)
-								backend_class.bname = p
 								ProxyBag.default_name = p if m[Cdefault]
-								host, port = o.split(/:/,2)
-								EventMachine.start_server(host, port.to_i, backend_class)
+								if existing_backends.has_key?(o)
+									# Do we need to do anything here other than skip?
+									next
+								else
+									existing_backends[o] = true
+									backend_class = Class.new(BackendProtocol)
+									backend_class.bname = incoming_hash
+									host, port = o.split(/:/,2)
+									EventMachine.start_server(host, port.to_i, backend_class)
+								end
 							end
 						end
 					end
