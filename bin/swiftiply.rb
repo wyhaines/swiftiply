@@ -74,19 +74,6 @@ module Swiftcore
 				end
 				opts.on('-d','--daemonize [YN]',[:y,:yes,:n,:no],'Whether swiftiply should put itself into the background.') do |yn|
 					config[Cdaemonize] = yn.to_s =~ /^y/i
-					if config[Cdaemonize] and on_windows?
-						begin
-							load_attempted ||= false
-							require 'win32/process'
-						rescue LoadError
-							unless load_attempted
-								load_attempted = true
-								retry
-							end
-							puts "You appear to be on a Windows platform, but the win32/process library is not installed, so the process can not be backgrounded.  'gem install win32-process' or http://rubyforge.org/projects/win32utils"
-							exit
-						end
-					end
 				end
 				opts.on('-t','--timeout [SECONDS]',Integer,'The server unavailable timeout.  Defaults to 3 seconds.') do |timeout|
 					config[Ctimeout] = timeout
@@ -103,14 +90,26 @@ module Swiftcore
 			config
 		end
 
+		def self.daemonize
+			if (child_pid = fork)
+				puts "PID #{child_pid}"
+				exit!
+			end
+
+			Process.setsid
+
+		rescue Exception
+			puts "Platform (#{RUBY_PLATFORM}) does not appear to support fork/setsid; skipping"
+		end
+
 		def self.postprocess_config_load(config)
 			config[Cmap] = [] unless Array === config[Cmap]
 			config[Ctimeout] ||= 3
 			config[Cmap].each do |m|
 				m[Ckeepalive] = true unless m.has_key?(Ckeepalive)
 				m[Ckeepalive] = !!m[Ckeepalive]
-				m[Coutgoing] = [m[Coutgoing]] unless Array == m[Coutgoing] and !m[Coutgoing].empty?
-				m[Cincoming] = [m[Cincoming]] unless Array == m[Cincoming] and !m[Cincoming].empty?
+				m[Coutgoing] = [m[Coutgoing]] unless Array === m[Coutgoing]
+				m[Cincoming] = [m[Cincoming]] unless Array === m[Cincoming]
 			end
 		end
 
@@ -123,6 +122,7 @@ module Swiftcore
 
 		def self.run
 			config = parse_options
+			daemonize if config[Cdaemonize]
 			Swiftcore::Swiftiply.run(config)
 		end
 
