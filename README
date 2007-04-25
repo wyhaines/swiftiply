@@ -1,0 +1,13 @@
+Swiftiply v. 0.5.0
+
+Swiftiply is a clustering proxy for web applications.  It is intended to be
+a backend agnostic clustering proxy that is specifically designed to support
+HTTP traffic from web frameworks. Unlike Pen (http://siag.nu/pen/), Swiftiply
+is not intended as a general purpose load balancer for tcp protocols.  Unlike
+HAProxy (http://haproxy.1wt.eu/) it is not a highly configurable general
+purpose proxy overflowing with features.
+
+What it is, though, is a very fast, narrowly targetted clustering proxy.
+In back to back comparisons of Swiftiply to HAProxy, Swiftiply reliably
+outperforms HAProxy (tested using IOWA backend processes).
+
