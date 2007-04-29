@@ -22,6 +22,7 @@ module Mongrel
 		def self.connect(hostname = nil,port = nil)
 			@hostname ||= hostname
 			@port ||= port
+
 			::EventMachine.connect(@hostname, @port, self) do |conn|
 				conn.set_comm_inactivity_timeout 60
 			end
@@ -136,7 +137,8 @@ module Mongrel
 			script_name, path_info, handlers = @classifier.resolve(params[Const::REQUEST_PATH])
 
 			if handlers
-				request = HttpRequest.new(params, linebuffer, nil)
+				notifiers = handlers.select { |h| h.request_notify }
+				request = HttpRequest.new(params, linebuffer, notifiers)
 
 				# request is good so far, continue processing the response
 				response = HttpResponse.new(client)
