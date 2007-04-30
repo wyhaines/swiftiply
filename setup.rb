@@ -19,7 +19,7 @@ Package.setup("1.0") {
 	lib("src/swiftcore/evented_mongrel.rb")
 	lib("src/swiftcore/swiftiplied_mongrel.rb")
 	ri(*Dir["src/swiftcore/**/*.rb"])
-	bin "bin/swiftiply.rb"
+	bin "bin/swiftiply"
 
 #	unit_test "test/TC_Swiftiply.rb"
 	
