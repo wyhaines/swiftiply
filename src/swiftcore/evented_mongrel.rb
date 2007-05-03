@@ -33,7 +33,8 @@ module Mongrel
 			@nparsed = @parser.execute(@params, @linebuffer, @nparsed) unless @parser.finished?
 			if @parser.finished?
 				if @request_len.nil?
-					@request_len = @nparsed + @params[::Mongrel::Const::CONTENT_LENGTH].to_i
+					#@request_len = @nparsed + @params[::Mongrel::Const::CONTENT_LENGTH].to_i
+					@request_len = @params[::Mongrel::Const::CONTENT_LENGTH].to_i
 					script_name, path_info, handlers = ::Mongrel::HttpServer::Instance.classifier.resolve(@params[::Mongrel::Const::REQUEST_PATH])
 					if handlers
 						@params[::Mongrel::Const::PATH_INFO] = path_info
@@ -44,10 +45,10 @@ module Mongrel
 					if @request_len > ::Mongrel::Const::MAX_BODY
 						new_buffer = Tempfile.new(::Mongrel::Const::MONGREL_TMP_BASE)
 						new_buffer.binmode
-						new_buffer << @linebuffer
+						new_buffer << @linebuffer[@nparsed..-1]
 						@linebuffer = new_buffer
 					else
-						@linebuffer = StringIO.new(@linebuffer)
+						@linebuffer = StringIO.new(@linebuffer[@nparsed..-1])
 					end
 				end
 				if @linebuffer.length >= @request_len
