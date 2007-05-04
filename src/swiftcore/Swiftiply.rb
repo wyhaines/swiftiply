@@ -151,7 +151,6 @@ module Swiftcore
 
 				def match_client_to_server_now(client)
 					sq = @server_q[@incoming_map[client.name]]
-					client.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
 					if client.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/ and sidx = sq.index(@reverse_id_map[$1])
 						server = sq.delete_at(sidx)
 						server.associate = client
@@ -359,8 +358,6 @@ module Swiftcore
 						@headers =~ /Content-Length:\s*([^\r\n]+)/
 						@content_length = $1.to_i
 						@associate.send_data @headers
-						#@associate.send_data d
-						#@content_sent += d.length
 						data = d
 					else
 						@headers << data
