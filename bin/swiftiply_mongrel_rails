@@ -1,0 +1,54 @@
+#!/usr/bin/env ruby
+
+ENV['SWIFT'] = 'true'
+require 'optparse'
+
+class MongrelSwiftStart
+  
+  def self.parse_options(config = {})
+    defaults={:env => 'production',
+              :pid => (File.expand_path(Dir.pwd)+'/log'),
+              :host => '127.0.0.1',
+              :port => 4000,
+              :num  => 1
+              }
+  	OptionParser.new do |opts|
+  		opts.banner = 'Usage: mongrel_swift [options]'
+  		opts.separator ''
+  		opts.on('-C','--config CONFFILE',"The mongrel configuration file to read.") do |conf|
+  			config[:conf] = conf
+  		end
+  		opts.on('-h','--host [HOST]','The hostname/IP address that the swiftiply proxy will listen on for backend connections.') do |host|
+  			config[:host] = host
+  		end
+  		opts.on('-p','--port [PORT]','The port that swiftiply proxy is listening on for backend connections. Use the same port for all mongrels!') do |port|
+  			config[:port] = port
+  		end
+  		opts.on('-d','--daemonize','Whether mongrel_rails should put itself into the background.') do |yn|
+  			config[:daemonize] = true
+  		end
+  		opts.on('-n','--num-mongrels [NUM]','The number of mongrels to start.') do |numm|
+  			config[:num] = numm.to_i
+  		end
+  		opts.on('-P','--pidfiles [NUM]','Path to store PID files.') do |numm|
+  			config[:num] = numm.to_i
+  		end
+  	end.parse!
+  	@config = defaults.update(config)
+  end
+  
+  def self.run
+    parse_options
+    @config[:num].times do |i|
+      cmd = "mongrel_rails start -p #{@config[:port]} " <<
+            "-e #{@config[:env]} #{@config[:daemonize] ? '-d' : ''}" <<
+            "-P #{File.join(@config[:pid],'dog' + i.to_s + '.pid')}" <<
+            "#{@config[:conf] ? ' -C '+@config[:conf] : ''}"
+      output = `#{cmd}`
+      puts output
+    end
+  end
+  
+end  
+
+MongrelSwiftStart.run
