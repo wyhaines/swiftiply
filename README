@@ -1,4 +1,4 @@
-Swiftiply v. 0.5.0
+Swiftiply v. 0.5.0  (http://swiftiply.swiftcore.org)
 
 Swiftiply is a backend agnostic clustering proxy for web applications that is
 specifically designed to support HTTP traffic from web frameworks. Unlike Pen
@@ -8,4 +8,119 @@ not a highly configurable general purpose proxy overflowing with features.
 
 What it is, though, is a very fast, narrowly targetted clustering proxy.
 In back to back comparisons of Swiftiply to HAProxy, Swiftiply reliably
-outperforms HAProxy (tested using IOWA, Rails, and Ramaze backend processes).
+outperforms HAProxy (tested using IOWA, Rails, Merb, and Ramaze backend
+processes running Mongrel).
+
+Swiftiply works differently from a traditional proxy.  In Swiftiply, the
+backend processes are clients of the Swiftiply server -- they make persistent
+socket connections to Swiftiply.  One of the major advantages to this
+architecture is that it allows one to start or stop backend processes at will,
+with no configuration of the proxy.  The obvious disadvantage is that this is
+not behavior that backends typically expect.
+
+Because Mongrel is the preferred deployment method for most Ruby frameworks,
+Swiftiply includes a version of Mongrel (found in swiftcore/swiftiplied_mongrel.rb)
+that has been modified to work as a swiftiply client.  This should be
+transparent to any existing Mongrel handlers, allowing them all to with
+Swiftiply.
+
+In addition, as an offshoot of the swiftiplied_mongrel, there is a second
+version that is available.  This other version is found in
+swiftcore/evented_mongrel.rb; it is a version of Mongrel that has its network
+traffic handled by EventMachine, creating a Mongrel that runs in an event
+based mode instead of a threaded mode.  For many applications, running in an
+event based mode will give better throughput than running in a threaded mode,
+especially when there are concurrent requests coming in.
+
+This is because the event based operation handles requests efficiently, on
+a first come, first served basis, without the overhead of threads.  For the
+typical Rails application, this means that request handling may be slightly
+faster than the threaded Mongrel for single, non-concurrent requests.  When
+there are concurrent requests, though, the differential increases quickly.
+
+
+FRAMEWORK SUPPORT
+
+
+Swiftcore IOWA
+
+IOWA has built in support for running in evented and clustered modes.
+
+
+Rails
+
+Swiftiply provides a _REPLACEMENT_ to mongrel_rails that, throught the use
+of an environment variable, can be told to run in either the evented mode or
+the swiftiplied mode.
+
+To run a Rails app in evented mode, set the EVENT environment variable.  On
+a unixlike system:
+
+env EVENT=1 mongrel_rails
+
+will do it.
+
+To run in swiftiplied mode:
+
+env SWIFTIPLY=1 mongrel_rails
+
+Because Swiftiply backends connect to the Swiftiply server, they all connect
+on the same port.  This is important.  Each of the backends runs against the
+same port.  To make it easier to start multiple Rails backends, a helper
+script, swiftiply_mongrel_rails, is provided.  It is just a light wrapper
+around mongrel_rails that will let one start N backends, with proper pid
+files, and stop them.
+
+
+Merb
+
+The merb source (trunk only, at this point), has Swiftiply support that works
+just like the Rails support, built in.
+
+
+Ramaze
+
+A couple adapters for Ramaze are included, to allow Ramaze to run with either
+the evented or the swiftiplied mongrels.  They are installed into
+
+ramaze/adapter/evented_mongrel.rb
+ramaze/adapter/swiftiplied_mongrel.rb
+
+
+Other Frameworks
+
+Swiftiply has been tested with Camping and Nitro, as well.  Direct support for
+them is not yet bundled, but will be in an upcoming release.
+
+
+CONFIGURATION
+
+Swiftiply takes a single configuration file which defines for it where it
+should listen for incoming connections, whether it should daemonize itself,
+and then provides a map of incoming domain names and the address/port to
+proxy that traffic to.  That outgoing address/port is where the backends for
+that site will connect to.
+
+Here's an example:
+
+cluster_address: swiftcore.org
+cluster_port: 80
+daemonize: true
+map:
+  - incoming:
+    - swiftcore.org
+    - www.swiftcore.org
+    outgoing: 127.0.0.1:30000
+    default: true
+  - incoming: iowa.swiftcore.org
+    outgoing: 127.0.0.1:30010
+  - incoming: analogger.swiftcore.org
+    outgoing: 127.0.0.1:30020
+  - incoming:
+    - swiftiply.com
+    - www.swiftiply.com
+    - swiftiply.swiftcore.org
+    outgoing: 127.0.0.1:30030
+
+
+
