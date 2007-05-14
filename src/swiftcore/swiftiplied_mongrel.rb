@@ -79,10 +79,10 @@ module Mongrel
 						@linebuffer = new_buffer
 					else
 						@linebuffer = StringIO.new(@linebuffer[@nparsed..-1])
-						#@linebuffer = StringIO.new(@linebuffer)
 					end
 				end
 				if @linebuffer.length >= @request_len
+					@linebuffer.rewind if @linebuffer.respond_to? :rewind
 					::Mongrel::HttpServer::Instance.process_http_request(@params,@linebuffer,self)
 					post_init
 				end

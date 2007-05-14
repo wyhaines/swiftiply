@@ -52,6 +52,7 @@ module Mongrel
 					end
 				end
 				if @linebuffer.length >= @request_len
+					@linebuffer.rewind if @linebuffer.respond_to? :rewind
 					::Mongrel::HttpServer::Instance.process_http_request(@params,@linebuffer,self)
 				end
 			elsif @linebuffer.length > ::Mongrel::Const::MAX_HEADER
