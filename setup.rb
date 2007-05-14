@@ -18,7 +18,7 @@ Package.setup("1.0") {
 	lib(*Dir["src/swiftcore/**/*.rb"])
 	lib("src/swiftcore/evented_mongrel.rb")
 	lib("src/swiftcore/swiftiplied_mongrel.rb")
-	lib("src/ramaze/adapter/*.rb")
+	lib(*Dir["src/ramaze/adapter/*.rb"])
 	ri(*Dir["src/swiftcore/**/*.rb"])
 	bin "bin/swiftiply"
 	bin "bin/swiftiply_mongrel_rails"
