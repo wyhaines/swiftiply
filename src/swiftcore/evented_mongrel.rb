@@ -33,7 +33,6 @@ module Mongrel
 			@nparsed = @parser.execute(@params, @linebuffer, @nparsed) unless @parser.finished?
 			if @parser.finished?
 				if @request_len.nil?
-					#@request_len = @nparsed + @params[::Mongrel::Const::CONTENT_LENGTH].to_i
 					@request_len = @params[::Mongrel::Const::CONTENT_LENGTH].to_i
 					script_name, path_info, handlers = ::Mongrel::HttpServer::Instance.classifier.resolve(@params[::Mongrel::Const::REQUEST_PATH])
 					if handlers
@@ -49,15 +48,24 @@ module Mongrel
 						@linebuffer = new_buffer
 					else
 						@linebuffer = StringIO.new(@linebuffer[@nparsed..-1])
+						@linebuffer.pos = @linebuffer.length
 					end
 				end
 				if @linebuffer.length >= @request_len
-					@linebuffer.rewind if @linebuffer.respond_to? :rewind
+					@linebuffer.rewind
 					::Mongrel::HttpServer::Instance.process_http_request(@params,@linebuffer,self)
+					@linebuffer.delete if Tempfile === @linebuffer
 				end
 			elsif @linebuffer.length > ::Mongrel::Const::MAX_HEADER
+				close_connection
 				raise ::Mongrel::HttpParserError.new("HEADER is longer than allowed, aborting client early.")
 			end
+		rescue ::Mongrel::HttpParserError
+			if $mongrel_debug_client
+				STDERR.puts "#{Time.now}: BAD CLIENT (#{params[Const::HTTP_X_FORWARDED_FOR] || client.peeraddr.last}): #$!"
+				STDERR.puts "#{Time.now}: REQUEST DATA: #{data.inspect}\n---\nPARAMS: #{params.inspect}\n---\n"
+			end
+			close_connection
 		rescue Exception => e
 			close_connection
 			raise e

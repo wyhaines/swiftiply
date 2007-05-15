@@ -1,6 +1,6 @@
 # This module rewrites pieces of the very good Mongrel web server in
 # order to change it from a threaded application to an event based
-# application running since an EventMachine event loop.  It should
+# application running inside an EventMachine event loop.  It should
 # be compatible with the existing Mongrel handlers for Rails,
 # Camping, Nitro, etc....
  
@@ -62,7 +62,6 @@ module Mongrel
 			@nparsed = @parser.execute(@params, @linebuffer, @nparsed) unless @parser.finished?
 			if @parser.finished?
 				if @request_len.nil?
-					#@request_len = @nparsed + @params[::Mongrel::Const::CONTENT_LENGTH].to_i
 					@request_len = @params[::Mongrel::Const::CONTENT_LENGTH].to_i
 					script_name, path_info, handlers = ::Mongrel::HttpServer::Instance.classifier.resolve(@params[::Mongrel::Const::REQUEST_PATH])
 					if handlers
@@ -75,20 +74,28 @@ module Mongrel
 						new_buffer = Tempfile.new(::Mongrel::Const::MONGREL_TMP_BASE)
 						new_buffer.binmode
 						new_buffer << @linebuffer[@nparsed..-1]
-						#new_buffer << @linebuffer
 						@linebuffer = new_buffer
 					else
 						@linebuffer = StringIO.new(@linebuffer[@nparsed..-1])
+						@linebuffer.pos = @linebuffer.length
 					end
 				end
 				if @linebuffer.length >= @request_len
-					@linebuffer.rewind if @linebuffer.respond_to? :rewind
+					@linebuffer.rewind
 					::Mongrel::HttpServer::Instance.process_http_request(@params,@linebuffer,self)
+					@linebuffer.delete if Tempfile === @linebuffer
 					post_init
 				end
 			elsif @linebuffer.length > ::Mongrel::Const::MAX_HEADER
+				close_connection
 				raise ::Mongrel::HttpParserError.new("HEADER is longer than allowed, aborting client early.")
 			end
+		rescue ::Mongrel::HttpParserError
+			if $mongrel_debug_client
+				STDERR.puts "#{Time.now}: BAD CLIENT (#{params[Const::HTTP_X_FORWARDED_FOR] || client.peeraddr.last}): #$!"
+				STDERR.puts "#{Time.now}: REQUEST DATA: #{data.inspect}\n---\nPARAMS: #{params.inspect}\n---\n"
+			end
+			close_connection
 		rescue Exception => e
 			close_connection
 			raise e
