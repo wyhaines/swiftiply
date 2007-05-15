@@ -12,6 +12,8 @@ end
 
 module Swiftcore
 	module Swiftiply
+		Version = '0.5.1'
+
 		Ccluster_address = 'cluster_address'.freeze
 		Ccluster_port = 'cluster_port'.freeze
 		CBackendAddress = 'BackendAddress'.freeze
