@@ -18,6 +18,9 @@ end
 require 'mongrel'
 
 module Mongrel
+	C0s = [0,0,0,0].freeze unless const_defined?(:C0s)
+	CCCCC = 'CCCC'.freeze unless const_defined?(:CCCCC)
+
 	class MongrelProtocol < EventMachine::Connection
 		def self.connect(hostname = nil,port = nil)
 			@hostname ||= hostname
@@ -38,6 +41,10 @@ module Mongrel
 
 		def connection_completed
 			@completed = true
+			ip = nil
+			ip = Socket.gethostbyname(@hostname)[3].unpack(CCCCC) rescue ip = C0s
+			id = 'swiftclient' << ip.collect {|x| sprintf('%02s',x.to_i.to_s(16)).sub(' ','0')}.join << sprintf('%04s',@port.to_i.to_s(16)).gsub(' ','0')
+			send_data id
 		end
 
 		def post_init

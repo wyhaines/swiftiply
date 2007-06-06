@@ -348,9 +348,15 @@ module Swiftcore
 
 			def receive_data data
 				unless @initialized
-					@id = data.slice!(0..11)
-					ProxyBag.add_id(self,@id)
-					@initialized = true
+					preamble = data.slice!(0..22)
+					if preamble[0..10] == 'swiftclient'
+						@id = preamble[11..22]
+						ProxyBag.add_id(self,@id)
+						@initialized = true
+					else
+						close_connection
+						return
+					end
 				end
 				unless @headers_completed 
 					if data.index(Crnrn)
@@ -377,7 +383,7 @@ module Swiftcore
 					end
 				end
 			rescue
-				@associate.close_connection_after_writing
+				@associate.close_connection_after_writing if @associate
 				@associate = nil
 				setup
 				ProxyBag.add_server self
@@ -390,7 +396,7 @@ module Swiftcore
 
 			def unbind
 				if @associate
-					if @initialized
+					if @content_length
 						@associate.close_connection_after_writing
 					else
 						ProxyBag.add_frontend_client(@associate)
