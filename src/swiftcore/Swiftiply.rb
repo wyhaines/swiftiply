@@ -390,7 +390,11 @@ module Swiftcore
 
 			def unbind
 				if @associate
-					@associate.close_connection_after_writing
+					if @initialized
+						@associate.close_connection_after_writing
+					else
+						ProxyBag.add_frontend_client(@associate)
+					end
 				else
 					ProxyBag.remove_server(self)
 				end
