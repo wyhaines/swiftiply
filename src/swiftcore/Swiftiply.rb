@@ -34,6 +34,7 @@ module Swiftcore
 		Coutgoing = 'outgoing'.freeze
 		Cport = 'port'.freeze
 		Credeployable = 'redeployable'.freeze
+		Credeployment_sizelimit = 'redeployment_sizelimit'.freeze
 		Ctimeout = 'timeout'.freeze
 		Curl = 'url'.freeze
 
@@ -92,8 +93,8 @@ module Swiftcore
 					@docroot_map[name] = path
 				end
 
-				def add_incoming_redeployable(name)
-					@redeployable_map[name] = true
+				def add_incoming_redeployable(name,limit)
+					@redeployable_map[name] = limit
 				end
 
 				def add_log(log,name)
@@ -160,9 +161,9 @@ module Swiftcore
 				def add_frontend_client clnt
 					clnt.create_time = @ctime
 
-					if @redeployable_map.has_key?(clnt.name)
-						clnt.redeployable = true
+					if clnt.redeployable = @redeployable_map[clnt.name]
 						clnt.data_pos = 0
+						clnt.data_len = 0
 					end
 
 					unless @docroot_map.has_key?(clnt.name) and serve_static_file(clnt)
@@ -289,7 +290,7 @@ module Swiftcore
 
 		class ClusterProtocol < EventMachine::Connection
 
-			attr_accessor :create_time, :associate, :name, :redeployable, :data_pos
+			attr_accessor :create_time, :associate, :name, :redeployable, :data_pos, :data_len
 
 			Crn = "\r\n".freeze
 			Crnrn = "\r\n\r\n".freeze
@@ -352,8 +353,9 @@ module Swiftcore
 						end
 					else
 						# redeployable data push
-						(@data.length - 1).downto(@data_pos) {|p| @associate.send_data @data[p]}
+						(@data.length - 1).downto(@data_pos) {|p| d = @data[p]; @associate.send_data d; @data_len += d.length}
 						@data_pos = @data.length
+						@redeployable = false if @data_len > @redeployable
 					end
 				end
 			end
@@ -506,7 +508,7 @@ module Swiftcore
 						m[Cincoming].each do |p|
 							ProxyBag.add_incoming_mapping(incoming_hash,p)
 							ProxyBag.add_incoming_docroot(m[Cdocroot],p) if m.has_key? Cdocroot
-							ProxyBag.add_incoming_redeployable(p) if m[Credeployable]
+							ProxyBag.add_incoming_redeployable(p, m[Credeployment_sizelimit] || 16384) if m[Credeployable]
 							m[Coutgoing].each do |o|
 								ProxyBag.default_name = p if m[Cdefault]
 								if existing_backends.has_key?(o)
