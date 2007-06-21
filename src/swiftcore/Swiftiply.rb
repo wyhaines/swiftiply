@@ -2,32 +2,40 @@ begin
 	load_attempted ||= false
 	require 'digest/sha2'
 	require 'eventmachine'
+	require 'mime/types'
 rescue LoadError => e
 	unless load_attempted
 		load_attempted = true
 		require 'rubygems'
+		retry
 	end
 	raise e
 end
 
 module Swiftcore
 	module Swiftiply
-		Version = '0.5.1'
+		Version = '0.5.2'
 
+		C_empty = ''.freeze
+		C_slash = '/'.freeze
+		C_slashindex_html = '/index.html'.freeze
 		Ccluster_address = 'cluster_address'.freeze
 		Ccluster_port = 'cluster_port'.freeze
 		CBackendAddress = 'BackendAddress'.freeze
 		CBackendPort = 'BackendPort'.freeze
-		Cmap = 'map'.freeze
+		Cdaemonize = 'daemonize'.freeze
+		Cdefault = 'default'.freeze
+		Cdocroot = 'docroot'.freeze
+		Chost = 'host'.freeze
 		Cincoming = 'incoming'.freeze
 		Ckeepalive = 'keepalive'.freeze
-		Cdaemonize = 'daemonize'.freeze
-		Curl = 'url'.freeze
-		Chost = 'host'.freeze
-		Cport = 'port'.freeze
+		Cmap = 'map'.freeze
+		Cmsg_expired = 'browser connection expired'.freeze
 		Coutgoing = 'outgoing'.freeze
+		Cport = 'port'.freeze
+		Credeployable = 'redeployable'.freeze
 		Ctimeout = 'timeout'.freeze
-		Cdefault = 'default'.freeze
+		Curl = 'url'.freeze
 
 		# The ProxyBag is a class that holds the client and the server queues,
 		# and that is responsible for managing them, matching them, and expiring
@@ -41,6 +49,9 @@ module Swiftcore
 			@id_map = {}
 			@reverse_id_map = {}
 			@incoming_map = {}
+			@docroot_map = {}
+			@log_map = {}
+			@redeployable_map = {}
 			@demanding_clients = Hash.new {|h,k| h[k] = []}
 
 			class << self
@@ -77,6 +88,18 @@ module Swiftcore
 					@incoming_map[name] = hashcode
 				end
 
+				def add_incoming_docroot(path,name)
+					@docroot_map[name] = path
+				end
+
+				def add_incoming_redeployable(name)
+					@redeployable_map[name] = true
+				end
+
+				def add_log(log,name)
+					@log_map[name] = log
+				end
+
 				def default_name
 					@default_name
 				end
@@ -98,17 +121,57 @@ module Swiftcore
 					@server_unavailable_timeout = val
 				end
 
+				# This is a NAIVE static file handler.  It's BAD for big files and
+				# is very simplistic.  On my devel server it will do about 6500 4k
+				# files per second.  This WILL be replaced by something faster,
+				# smarter, and better.
+
+				def serve_static_file(clnt)
+					path_info = clnt.uri
+					#if path_info == C_slash or path_info == C_empty
+					#	path_info = C_slashindex_html
+					#elsif path_info =~ /^([^.]+)$/
+					#	path_info = "#{$1}/index.html"
+					#end
+					client_name = clnt.name
+					dr = @docroot_map[client_name]
+					path = File.join(dr,path_info)
+					if FileTest.exist?(path)
+						suffix = path_info.sub(/[_\s]*$/,C_empty)
+						clnt.send_data "HTTP/1.1 200 OK\r\n"
+						d = File.read(path)
+						ct = ::MIME::Types.type_for(path_info.sub(/[_\s]*$/,C_empty)).first
+						clnt.send_data "Connection: close\r\nDate: #{Time.now.httpdate}\r\nContent-Type: #{ct ? ct.content_type : 'application/octet-stream'}\r\nContent-Length: #{d.length}\r\n\r\n"
+						clnt.send_data d
+						clnt.close_connection_after_writing
+						@log_map.has_key?(client_name) && log_map[client_name].log(Cinfo,path_info)
+						true
+					else
+						false
+					end
+				rescue Object => e
+					false
+				end
+
 				# Pushes a front end client (web browser) into the queue of clients
 				# waiting to be serviced if there's no server available to handle
 				# it right now.
 
 				def add_frontend_client clnt
 					clnt.create_time = @ctime
-					unless match_client_to_server_now(clnt)
-						if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
-							@demanding_clients[$1].unshift clnt
-						else
-							@client_q[clnt.name].unshift(clnt)
+
+					if @redeployable_map.has_key?(clnt.name)
+						clnt.redeployable = true
+						clnt.data_pos = 0
+					end
+
+					unless @docroot_map.has_key?(clnt.name) and serve_static_file(clnt)
+						unless match_client_to_server_now(clnt)
+							if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
+								@demanding_clients[$1].unshift clnt
+							else
+								@client_q[@incoming_map[clnt.name]].unshift(clnt)
+							end
 						end
 					end
 				end
@@ -196,6 +259,7 @@ module Swiftcore
 
 				def expire_clients
 					now = Time.now
+
 					@server_q.each_key do |name|
 						unless @server_q[name].first
 							while c = @client_q[name].pop
@@ -225,7 +289,7 @@ module Swiftcore
 
 		class ClusterProtocol < EventMachine::Connection
 
-			attr_accessor :create_time, :associate, :name
+			attr_accessor :create_time, :associate, :name, :redeployable, :data_pos
 
 			Crn = "\r\n".freeze
 			Crnrn = "\r\n\r\n".freeze
@@ -281,8 +345,15 @@ module Swiftcore
 
 			def push
 				if @associate
-					while data = @data.pop
-						@associate.send_data data
+					unless @redeployable
+						# normal data push
+						while data = @data.pop
+							@associate.send_data data
+						end
+					else
+						# redeployable data push
+						(@data.length - 1).downto(@data_pos) {|p| @associate.send_data @data[p]}
+						@data_pos = @data.length
 					end
 				end
 			end
@@ -301,8 +372,11 @@ module Swiftcore
 				@uri
 			end
 
-		end
+			def setup_for_redeployment
+				@data_pos = 0
+			end
 
+		end
 
 		# The BackendProtocol is the EventMachine::Connection subclass that
 		# handles the communications between Swiftiply and the backend process
@@ -382,7 +456,7 @@ module Swiftcore
 						ProxyBag.add_server self
 					end
 				end
-			rescue
+			rescue => e
 				@associate.close_connection_after_writing if @associate
 				@associate = nil
 				setup
@@ -396,9 +470,11 @@ module Swiftcore
 
 			def unbind
 				if @associate
-					if @content_length
+					if !@associate.redeployable or @content_length
 						@associate.close_connection_after_writing
 					else
+						@associate.associate = nil
+						@associate.setup_for_redeployment
 						ProxyBag.add_frontend_client(@associate)
 					end
 				else
@@ -426,9 +502,11 @@ module Swiftcore
 				EventMachine.start_server(config[Ccluster_address], config[Ccluster_port], ClusterProtocol)
 				config[Cmap].each do |m|
 					if m[Ckeepalive]
-						incoming_hash = Digest::SHA512.hexdigest(m[Cincoming].join('|'))
+						incoming_hash = Digest::SHA256.hexdigest(m[Cincoming].join('|'))
 						m[Cincoming].each do |p|
 							ProxyBag.add_incoming_mapping(incoming_hash,p)
+							ProxyBag.add_incoming_docroot(m[Cdocroot],p) if m.has_key? Cdocroot
+							ProxyBag.add_incoming_redeployable(p) if m[Credeployable]
 							m[Coutgoing].each do |o|
 								ProxyBag.default_name = p if m[Cdefault]
 								if existing_backends.has_key?(o)
