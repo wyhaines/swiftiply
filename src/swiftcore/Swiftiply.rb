@@ -2,6 +2,7 @@ begin
 	load_attempted ||= false
 	require 'digest/sha2'
 	require 'eventmachine'
+	require 'fastfilereader'
 	require 'mime/types'
 rescue LoadError => e
 	unless load_attempted
@@ -19,6 +20,7 @@ module Swiftcore
 		C_empty = ''.freeze
 		C_slash = '/'.freeze
 		C_slashindex_html = '/index.html'.freeze
+		Caos = 'application/octet-stream'.freeze
 		Ccluster_address = 'cluster_address'.freeze
 		Ccluster_port = 'cluster_port'.freeze
 		CBackendAddress = 'BackendAddress'.freeze
@@ -26,6 +28,8 @@ module Swiftcore
 		Cdaemonize = 'daemonize'.freeze
 		Cdefault = 'default'.freeze
 		Cdocroot = 'docroot'.freeze
+		Cepoll = 'epoll'.freeze
+		Cepoll_descriptors = 'epoll_descriptors'.freeze
 		Chost = 'host'.freeze
 		Cincoming = 'incoming'.freeze
 		Ckeepalive = 'keepalive'.freeze
@@ -37,6 +41,7 @@ module Swiftcore
 		Credeployment_sizelimit = 'redeployment_sizelimit'.freeze
 		Ctimeout = 'timeout'.freeze
 		Curl = 'url'.freeze
+		Cuser = 'user'.freeze
 
 		# The ProxyBag is a class that holds the client and the server queues,
 		# and that is responsible for managing them, matching them, and expiring
@@ -122,35 +127,39 @@ module Swiftcore
 					@server_unavailable_timeout = val
 				end
 
-				# This is a NAIVE static file handler.  It's BAD for big files and
-				# is very simplistic.  On my devel server it will do about 6500 4k
-				# files per second.  This WILL be replaced by something faster,
-				# smarter, and better.
-
+				# Handle static files.  It employs an extension to efficiently handle
+				# large files, and depends on an addition to EventMachine,
+				# send_file_data(), to efficiently handle small files.  That addition
+				# will hopefully be released in a 0.8.1 version of EM very soon.
+				# In my tests, it streams in excess of 100 megabytes of data per
+				# second for large files, and does 8000 to 9000 requests per second
+				# with small files (i.e. under 4k).  I think this can still be improved
+				# upon, especially for small files.
+				
 				def serve_static_file(clnt)
 					path_info = clnt.uri
-					#if path_info == C_slash or path_info == C_empty
-					#	path_info = C_slashindex_html
-					#elsif path_info =~ /^([^.]+)$/
-					#	path_info = "#{$1}/index.html"
-					#end
 					client_name = clnt.name
 					dr = @docroot_map[client_name]
 					path = File.join(dr,path_info)
 					if FileTest.exist?(path)
-						suffix = path_info.sub(/[_\s]*$/,C_empty)
-						clnt.send_data "HTTP/1.1 200 OK\r\n"
-						d = File.read(path)
-						ct = ::MIME::Types.type_for(path_info.sub(/[_\s]*$/,C_empty)).first
-						clnt.send_data "Connection: close\r\nDate: #{Time.now.httpdate}\r\nContent-Type: #{ct ? ct.content_type : 'application/octet-stream'}\r\nContent-Length: #{d.length}\r\n\r\n"
-						clnt.send_data d
-						clnt.close_connection_after_writing
-						@log_map.has_key?(client_name) && log_map[client_name].log(Cinfo,path_info)
+						ct = ::MIME::Types.type_for(path_info).first
+						fsize = File.size?(path)
+						if fsize > 32768
+							ffr = EM::FastFileReader.new(path)
+							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct ? ct.content_type : Caos}\r\nTransfer-encoding: chunked\r\n\r\n"
+							ffr.stream_as_http_chunks(clnt)
+							ffr.callback {clnt.close_connection_after_writing}
+						else
+							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct ? ct.content_type : Caos}\r\nContent-length: #{fsize}\r\n\r\n"
+							clnt.send_file_data path
+							clnt.close_connection_after_writing
+						end
 						true
 					else
 						false
 					end
 				rescue Object => e
+					puts "Exception #{e}"
 					false
 				end
 
@@ -500,6 +509,8 @@ module Swiftcore
 
 		def self.run(config, key = nil)
 			existing_backends = {}
+			EventMachine.epoll if config[Cepoll]
+			EventMachine.set_descriptor_table_size(4096 || config[Cepoll_descriptors])
 			EventMachine.run do
 				EventMachine.start_server(config[Ccluster_address], config[Ccluster_port], ClusterProtocol)
 				config[Cmap].each do |m|
@@ -525,6 +536,7 @@ module Swiftcore
 						end
 					end
 				end
+				EventMachine.set_effective_user = config[Cuser] if config[Cuser]
 				ProxyBag.server_unavailable_timeout ||= config[Ctimeout]
 				ProxyBag.key = key
 				EventMachine.add_periodic_timer(2) { ProxyBag.expire_clients }
