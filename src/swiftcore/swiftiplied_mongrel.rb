@@ -132,8 +132,8 @@ module Mongrel
 		end
 
 		def run
-			trap('INT') { raise StopServer }
-			trap('TERM') { raise StopServer }
+			trap('INT') { EventMachine.stop_event_loop }
+			trap('TERM') { EventMachine.top_event_loop }
 			@acceptor = Thread.new do
 				EventMachine.run do
 					begin
