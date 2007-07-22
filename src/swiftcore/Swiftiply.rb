@@ -15,7 +15,7 @@ end
 
 module Swiftcore
 	module Swiftiply
-		Version = '0.5.2'
+		Version = '0.6.0'
 
 		C_empty = ''.freeze
 		C_slash = '/'.freeze
@@ -23,6 +23,7 @@ module Swiftcore
 		Caos = 'application/octet-stream'.freeze
 		Ccluster_address = 'cluster_address'.freeze
 		Ccluster_port = 'cluster_port'.freeze
+		Ccluster_server = 'cluster_server'.freeze
 		CBackendAddress = 'BackendAddress'.freeze
 		CBackendPort = 'BackendPort'.freeze
 		Cdaemonize = 'daemonize'.freeze
@@ -39,9 +40,12 @@ module Swiftcore
 		Cport = 'port'.freeze
 		Credeployable = 'redeployable'.freeze
 		Credeployment_sizelimit = 'redeployment_sizelimit'.freeze
+		Cswiftclient = 'swiftclient'.freeze
 		Ctimeout = 'timeout'.freeze
 		Curl = 'url'.freeze
 		Cuser = 'user'.freeze
+
+		RunningConfig = {}
 
 		# The ProxyBag is a class that holds the client and the server queues,
 		# and that is responsible for managing them, matching them, and expiring
@@ -98,10 +102,18 @@ module Swiftcore
 					@docroot_map[name] = path
 				end
 
+				def remove_incoming_docroot(name)
+					@docroot_map.delete(name)
+				end
+
 				def add_incoming_redeployable(name,limit)
 					@redeployable_map[name] = limit
 				end
 
+				def remove_incoming_redeployable(name)
+					@redeployable_map.delete(name)
+				end
+				
 				def add_log(log,name)
 					@log_map[name] = log
 				end
@@ -396,6 +408,7 @@ module Swiftcore
 		class BackendProtocol < EventMachine::Connection
 			attr_accessor :associate, :id
 
+			C0rnrn = "0\r\n\r\n".freeze
 			Crnrn = "\r\n\r\n".freeze
 			Rrnrn = /\r\n\r\n/
 
@@ -426,15 +439,16 @@ module Swiftcore
 			end
 
 			# Receive data from the backend process.  Headers are parsed from
-			# the rest of the content, and the Content-Length header used to
-			# determine when the complete response has been read.  The proxy
-			# will attempt to maintain a persistent connection with the backend,
-			# allowing for greater throughput.
+			# the rest of the content.  If a Content-Length header is present,
+			# that is used to determine how much data to expect.  Otherwise,
+			# if 'Transfer-encoding: chunked' is present, assume chunked
+			# encoding.  Otherwise be paranoid and assume a content length
+			# of 0.
 
 			def receive_data data
 				unless @initialized
 					preamble = data.slice!(0..22)
-					if preamble[0..10] == 'swiftclient'
+					if preamble[0..10] == Cswiftclient
 						@id = preamble[11..22]
 						ProxyBag.add_id(self,@id)
 						@initialized = true
@@ -446,10 +460,16 @@ module Swiftcore
 				unless @headers_completed 
 					if data.index(Crnrn)
 						@headers_completed = true
-						h,d = data.split(Rrnrn)
-						@headers << h << Crnrn
-						@headers =~ /Content-Length:\s*([^\r\n]+)/
-						@content_length = $1.to_i
+						h,d = data.split(Rrnrn,2)
+						@headers << h
+						@headers << Crnrn
+						if @headers =~ /Content-[Ll]ength:\s*([^\r\n]+)/
+							@content_length = $1.to_i
+						elsif @headers =~ /Transfer-encoding:\s*chunked/
+							@content_length = nil
+						else
+							@content_length = 0
+						end
 						@associate.send_data @headers
 						data = d
 					else
@@ -460,7 +480,12 @@ module Swiftcore
 				if @headers_completed
 					@associate.send_data data
 					@content_sent += data.length
-					if @content_sent >= @content_length
+					if @content_length and @content_sent >= @content_length
+						@associate.close_connection_after_writing
+						@associate = nil
+						setup
+						ProxyBag.add_server self
+					elsif data[-6..-1] == C0rnrn
 						@associate.close_connection_after_writing
 						@associate = nil
 						setup
@@ -508,40 +533,97 @@ module Swiftcore
 		# clients and to update the Proxy's clock.
 
 		def self.run(config, key = nil)
-			existing_backends = {}
+			@existing_backends = {}
 			EventMachine.epoll if config[Cepoll]
-			EventMachine.set_descriptor_table_size(4096 || config[Cepoll_descriptors])
+			EventMachine.set_descriptor_table_size(4096 || config[Cepoll_descriptors]) if config[Cepoll]
 			EventMachine.run do
-				EventMachine.start_server(config[Ccluster_address], config[Ccluster_port], ClusterProtocol)
-				config[Cmap].each do |m|
-					if m[Ckeepalive]
-						incoming_hash = Digest::SHA256.hexdigest(m[Cincoming].join('|'))
-						m[Cincoming].each do |p|
-							ProxyBag.add_incoming_mapping(incoming_hash,p)
-							ProxyBag.add_incoming_docroot(m[Cdocroot],p) if m.has_key? Cdocroot
-							ProxyBag.add_incoming_redeployable(p, m[Credeployment_sizelimit] || 16384) if m[Credeployable]
-							m[Coutgoing].each do |o|
-								ProxyBag.default_name = p if m[Cdefault]
-								if existing_backends.has_key?(o)
-									# Do we need to do anything here other than skip?
-									next
-								else
-									existing_backends[o] = true
-									backend_class = Class.new(BackendProtocol)
-									backend_class.bname = incoming_hash
-									host, port = o.split(/:/,2)
-									EventMachine.start_server(host, port.to_i, backend_class)
-								end
+				em_config(config,key)
+				GC.start
+			end
+		end
+		
+		def self.em_config(config,key = nil)
+			new_config = {}
+			if RunningConfig[Ccluster_address] != config[Ccluster_address] or RunningConfig[Ccluster_port] != config[Ccluster_port]
+		    	new_config[Ccluster_server] = EventMachine.start_server(
+                	config[Ccluster_address],
+                	config[Ccluster_port],
+                	ClusterProtocol)
+					new_config[Ccluster_address] = config[Ccluster_address]
+					new_config[Ccluster_port] = config[Ccluster_port]
+		    	RunningConfig[Ccluster_server].stop_server if RunningConfig.has_key?(Ccluster_server)
+			else
+				new_config[Ccluster_server] = RunningConfig[Ccluster_server]
+				new_config[Ccluster_address] = RunningConfig[Ccluster_address]
+				new_config[Ccluster_port] = RunningConfig[Ccluster_port]
+			end
+		    	
+			new_config[Coutgoing] = {}
+			config[Cmap].each do |m|
+				if m[Ckeepalive]
+					# keepalive requests are standard Swiftiply requests.
+					
+					# The hash of the "outgoing" config section.  It is used to
+					# uniquely identify a section.
+					hash = Digest::SHA256.hexdigest(m[Cincoming].sort.join('|')).intern
+					
+					# For each incoming entry, do setup.
+					new_config[Cincoming] = {}
+					m[Cincoming].each do |p|
+						new_config[Cincoming][p] = {}
+						ProxyBag.add_incoming_mapping(hash,p)
+						
+						if m.has_key?(Cdocroot)
+							ProxyBag.add_incoming_docroot(m[Cdocroot],p)
+						else
+							ProxyBag.remove_incoming_docroot(p)
+						end
+						
+						if m[Credeployable]
+							ProxyBag.add_incoming_redeployable(p, m[Credeployment_sizelimit] || 16384)
+						else
+							ProxyBag.remove_incoming_redeployable(p)
+						end
+						
+						m[Coutgoing].each do |o|
+							ProxyBag.default_name = p if m[Cdefault]
+							if @existing_backends.has_key?(o)
+								new_config[Coutgoing][o] = RunningConfig[Coutgoing][o]
+								next
+							else
+								@existing_backends[o] = true
+								backend_class = Class.new(BackendProtocol)
+								backend_class.bname = hash
+								host, port = o.split(/:/,2)
+								new_config[Coutgoing][o] = EventMachine.start_server(host, port.to_i, backend_class)
+							end
+						end
+						
+						# Now stop everything that is still running but which isn't needed.
+						if RunningConfig.has_key?(Coutgoing)
+							(RunningConfig[Coutgoing].keys - new_config[Coutgoing]).each do |unneeded_server|
+								unneeded_server.stop_server
 							end
 						end
 					end
+				else
+					# This is where the code goes that sets up traditional proxy destinations.
+					# This is a future TODO item.	
 				end
-				EventMachine.set_effective_user = config[Cuser] if config[Cuser]
-				ProxyBag.server_unavailable_timeout ||= config[Ctimeout]
-				ProxyBag.key = key
+			end
+			EventMachine.set_effective_user = config[Cuser] if config[Cuser] and RunningConfig[Cuser] != config[Cuser]
+			new_config[Cuser] = config[Cuser]
+			
+			ProxyBag.server_unavailable_timeout ||= config[Ctimeout]
+			ProxyBag.key = key
+			
+			unless RunningConfig[:initialized]
 				EventMachine.add_periodic_timer(2) { ProxyBag.expire_clients }
 				EventMachine.add_periodic_timer(1) { ProxyBag.update_ctime }
+				new_config[:initialized] = true
 			end
+			
+			RunningConfig.replace new_config
 		end
 	end
 end
