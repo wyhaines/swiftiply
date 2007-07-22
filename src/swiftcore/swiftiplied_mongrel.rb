@@ -133,11 +133,11 @@ module Mongrel
 
 		def run
 			trap('INT') { EventMachine.stop_event_loop }
-			trap('TERM') { EventMachine.top_event_loop }
+			trap('TERM') { EventMachine.stop_event_loop }
 			@acceptor = Thread.new do
 				EventMachine.run do
 					begin
-						EventMachine.connect(@host,@port,MongrelProtocol)
+						MongrelProtocol.connect(@host,@port)
 					rescue StopServer
 						EventMachine.stop_event_loop
 					end
