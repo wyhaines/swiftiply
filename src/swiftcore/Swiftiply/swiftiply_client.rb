@@ -31,12 +31,12 @@ class SwiftiplyClientProtocol < EventMachine::Connection
 	CContentLength = 'Content-Length'.freeze
 	DefaultHeaders = {'Connection' => 'close', 'Content-Type' => 'text/plain'}
 	
-	def self.connect(hostname = nil,port = nil)
+	def self.connect(hostname = nil,port = nil,key = '')
 		connection = ::EventMachine.connect(hostname, port, self) do |conn|
 			conn.hostname = hostname
 			conn.port = port
 			ip = conn.ip = conn.__get_ip(hostname)
-			conn.id = 'swiftclient' << ip.collect {|x| sprintf('%02s',x.to_i.to_s(16)).sub(' ','0')}.join << sprintf('%04s',port.to_i.to_s(16)).gsub(' ','0')
+			conn.id = 'swiftclient' << ip.collect {|x| sprintf('%02s',x.to_i.to_s(16)).sub(' ','0')}.join << sprintf('%04s',port.to_i.to_s(16)).gsub(' ','0') << key.length << key
 			conn.set_comm_inactivity_timeout inactivity_timeout
 		end
 	end

@@ -21,11 +21,14 @@ module Swiftcore
 		C_slash = '/'.freeze
 		C_slashindex_html = '/index.html'.freeze
 		Caos = 'application/octet-stream'.freeze
+		CCacheDirectory = 'CacheDirectory'.freeze
+		CCacheExtensions = 'CacheExtensions'.freeze
 		Ccluster_address = 'cluster_address'.freeze
 		Ccluster_port = 'cluster_port'.freeze
 		Ccluster_server = 'cluster_server'.freeze
 		CBackendAddress = 'BackendAddress'.freeze
 		CBackendPort = 'BackendPort'.freeze
+		Cchunked_encoding_threshold = 'chunked_encoding_threshold'.freeze
 		Cdaemonize = 'daemonize'.freeze
 		Cdefault = 'default'.freeze
 		Cdocroot = 'docroot'.freeze
@@ -34,6 +37,7 @@ module Swiftcore
 		Chost = 'host'.freeze
 		Cincoming = 'incoming'.freeze
 		Ckeepalive = 'keepalive'.freeze
+		Ckey = 'key'.freeze
 		Cmap = 'map'.freeze
 		Cmsg_expired = 'browser connection expired'.freeze
 		Coutgoing = 'outgoing'.freeze
@@ -45,6 +49,8 @@ module Swiftcore
 		Curl = 'url'.freeze
 		Cuser = 'user'.freeze
 
+		C_fsep = File::SEPARATOR
+		
 		RunningConfig = {}
 
 		# The ProxyBag is a class that holds the client and the server queues,
@@ -62,6 +68,7 @@ module Swiftcore
 			@docroot_map = {}
 			@log_map = {}
 			@redeployable_map = {}
+			@keys = {}
 			@demanding_clients = Hash.new {|h,k| h[k] = []}
 
 			class << self
@@ -74,14 +81,12 @@ module Swiftcore
 				# connections must send the correct access key before being added to
 				# the cluster as a valid backend.
 
-				def key
-					@key
+				def get_key(h)
+					@keys[h] || C_empty
 				end
 
-				# Sets the access key.
-
-				def key=(val)
-					@key = val
+				def set_key(h,val)
+					@keys[h] = val
 				end
 
 				def add_id(who,what)
@@ -97,6 +102,10 @@ module Swiftcore
 				def add_incoming_mapping(hashcode,name)
 					@incoming_map[name] = hashcode
 				end
+				
+				def remove_incoming_mapping(name)
+					@incoming_map.delete(name)
+				end
 
 				def add_incoming_docroot(path,name)
 					@docroot_map[name] = path
@@ -106,7 +115,7 @@ module Swiftcore
 					@docroot_map.delete(name)
 				end
 
-				def add_incoming_redeployable(name,limit)
+				def add_incoming_redeployable(limit,name)
 					@redeployable_map[name] = limit
 				end
 
@@ -118,6 +127,9 @@ module Swiftcore
 					@log_map[name] = log
 				end
 
+				# Sets the default proxy destination, if requests are received
+				# which do not match a defined destination.
+				
 				def default_name
 					@default_name
 				end
@@ -127,40 +139,53 @@ module Swiftcore
 				end
 
 				# This timeout is the amount of time a connection will sit in queue
-				# waiting for a backend to process it.
+				# waiting for a backend to process it.  A client connection that
+				# sits for longer than this timeout receives a 503 response and
+				# is dropped.
 
 				def server_unavailable_timeout
 					@server_unavailable_timeout
 				end
 
-				# Sets the server unavailable timeout value.
-
 				def server_unavailable_timeout=(val)
 					@server_unavailable_timeout = val
 				end
 
-				# Handle static files.  It employs an extension to efficiently handle
-				# large files, and depends on an addition to EventMachine,
-				# send_file_data(), to efficiently handle small files.  That addition
-				# will hopefully be released in a 0.8.1 version of EM very soon.
-				# In my tests, it streams in excess of 100 megabytes of data per
-				# second for large files, and does 8000 to 9000 requests per second
-				# with small files (i.e. under 4k).  I think this can still be improved
-				# upon, especially for small files.
+				# The chunked_encoding_threshold is a file size limit.  Files
+				# which fall below this limit are sent in one chunk of data.
+				# Files which hit or exceed this limit are delivered via chunked
+				# encoding.
+				
+				def chunked_encoding_threshold
+					@chunked_enconding_threshold
+				end
+				
+				def chunked_encoding_threshold=(val)
+					@chunked_encoding_threshold = val
+				end
+				
+				# Handle static files.  It employs an extension to efficiently
+				# handle large files, and depends on an addition to
+				# EventMachine, send_file_data(), to efficiently handle small
+				# files.  In my tests, it streams in excess of 120 megabytes of
+				# data per second for large files, and does 8000+ to 9000+
+				# requests per second with small files (i.e. under 4k).  I think
+				# this can still be improved upon for small files.
+				#
+				# Todo for 0.7.0 -- add etag/if-modified/if-modified-since
+				# support.
+				#
 				
 				def serve_static_file(clnt)
 					path_info = clnt.uri
 					client_name = clnt.name
 					dr = @docroot_map[client_name]
-					path = File.join(dr,path_info)
-					if FileTest.exist?(path)
-						ct = ::MIME::Types.type_for(path_info).first
+					if path = find_static_file(dr,path_info,client_name)
+						ct = ::MIME::Types.type_for(path).first
 						fsize = File.size?(path)
-						if fsize > 32768
-							ffr = EM::FastFileReader.new(path)
+						if fsize > @chunked_encoding_threshold
 							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct ? ct.content_type : Caos}\r\nTransfer-encoding: chunked\r\n\r\n"
-							ffr.stream_as_http_chunks(clnt)
-							ffr.callback {clnt.close_connection_after_writing}
+							EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing}
 						else
 							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct ? ct.content_type : Caos}\r\nContent-length: #{fsize}\r\n\r\n"
 							clnt.send_file_data path
@@ -171,10 +196,21 @@ module Swiftcore
 						false
 					end
 				rescue Object => e
-					puts "Exception #{e}"
+					clnt.close_connection_after_writing
 					false
 				end
 
+				# Determine if the requested file, in the given docroot, exists
+				# and is a file (i.e. not a directory).
+				#
+				# If Rails style page caching is enabled, this method will be
+				# dynamically replaced by a more sophisticated version.
+				
+				def find_static_file(docroot,path_info,client_name)
+					path = File.join(docroot,path_info)
+					path if FileTest.exist?(path) and FileTest.file?(path)
+				end
+				
 				# Pushes a front end client (web browser) into the queue of clients
 				# waiting to be serviced if there's no server available to handle
 				# it right now.
@@ -182,14 +218,16 @@ module Swiftcore
 				def add_frontend_client clnt
 					clnt.create_time = @ctime
 
-					if clnt.redeployable = @redeployable_map[clnt.name]
-						clnt.data_pos = 0
-						clnt.data_len = 0
-					end
+					clnt.data_pos = clnt.data_len = 0 if clnt.redeployable = @redeployable_map[clnt.name]
 
 					unless @docroot_map.has_key?(clnt.name) and serve_static_file(clnt)
 						unless match_client_to_server_now(clnt)
 							if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
+								# NOTE: I hate using unshift and delete on arrays
+								# in this code.  Look at switching to something
+								# with a faster profile for push/pull from both
+								# ends as well as deletes.  There has to be
+								# something.
 								@demanding_clients[$1].unshift clnt
 							else
 								@client_q[@incoming_map[clnt.name]].unshift(clnt)
@@ -202,19 +240,23 @@ module Swiftcore
 				# client to service if there are no clients waiting to be serviced.
 
 				def add_server srvr
+					# Unshift is slow if there are a lot of elements.
 					@server_q[srvr.name].unshift(srvr) unless match_server_to_client_now(srvr)
 				end
 
 				# Deletes the provided server from the server queue.
 
 				def remove_server srvr
+					# Delete is also slow if there are a lot of elements.
+					# TODO: explore a different data structure -- a linked list with a
+					# hash index, or an rbtree?
 					@server_q[srvr.name].delete srvr
 				end
 
 				# Removes the named client from the client queue.
-				# TODO: Try replacing this with a linked list.  Performance
-				# here has to suck when the list is long.
-
+				# TODO: Try replacing this with ...something.  Performance
+				# here has to be bad when the list is long.
+				
 				def remove_client clnt
 					@client_q[clnt.name].delete clnt
 				end
@@ -233,7 +275,7 @@ module Swiftcore
 				#	end
 				#end
 
-				# Tries to match the client passed as an argument to a
+				# Tries to match the client (passed as an argument) to a
 				# server.
 
 				def match_client_to_server_now(client)
@@ -254,7 +296,7 @@ module Swiftcore
 					end
 				end
 	
-				# Tries to match the server passed as an argument to a
+				# Tries to match the server (passed as an argument) to a
 				# client.
 
 				def match_server_to_client_now(server)
@@ -277,7 +319,9 @@ module Swiftcore
 				# available to process clients and expire any clients that
 				# have been waiting longer than @server_unavailable_timeout
 				# seconds.  Clients which are expired will receive a 503
-				# response.
+				# response.  If this is happening, either you need more
+				# backend processes, or you @server_unavailable_timeout is
+				# too short.
 
 				def expire_clients
 					now = Time.now
@@ -338,10 +382,12 @@ module Swiftcore
 					data =~ /\s([^\s\?]*)/
 					@uri ||= $1
 					if data =~ /^Host:\s*([^\r\n:]*)/
-						@name = $1
+						# NOTE: Should I be using intern for this?  It might not
+						# be a good idea.
+						@name = $1.intern
 						ProxyBag.add_frontend_client self
 						push
-					elsif data.index(/\r\n\r\n/)
+					elsif data =~ /\r\n\r\n/
 						@name = ProxyBag.default_name
 						ProxyBag.add_frontend_client self
 						push
@@ -447,8 +493,12 @@ module Swiftcore
 
 			def receive_data data
 				unless @initialized
-					preamble = data.slice!(0..22)
-					if preamble[0..10] == Cswiftclient
+					preamble = data.slice!(0..24)
+					
+					keylen = preamble[23..24].to_i
+					keylen = 0 if keylen < 0
+					key = keylen > 0 ? data.slice!(0..(keylen - 1)) : C_empty
+					if preamble[0..10] == Cswiftclient and key == ProxyBag.get_key(@name)
 						@id = preamble[11..22]
 						ProxyBag.add_id(self,@id)
 						@initialized = true
@@ -457,12 +507,12 @@ module Swiftcore
 						return
 					end
 				end
+				
 				unless @headers_completed 
-					if data.index(Crnrn)
+					if data =~ /\r\n\r\n/
 						@headers_completed = true
 						h,d = data.split(Rrnrn,2)
-						@headers << h
-						@headers << Crnrn
+						@headers << h << Crnrn
 						if @headers =~ /Content-[Ll]ength:\s*([^\r\n]+)/
 							@content_length = $1.to_i
 						elsif @headers =~ /Transfer-encoding:\s*chunked/
@@ -532,17 +582,17 @@ module Swiftcore
 		# handlers, then create the timers that are used to expire unserviced
 		# clients and to update the Proxy's clock.
 
-		def self.run(config, key = nil)
+		def self.run(config)
 			@existing_backends = {}
 			EventMachine.epoll if config[Cepoll]
 			EventMachine.set_descriptor_table_size(4096 || config[Cepoll_descriptors]) if config[Cepoll]
 			EventMachine.run do
-				em_config(config,key)
+				em_config(config)
 				GC.start
 			end
 		end
 		
-		def self.em_config(config,key = nil)
+		def self.em_config(config)
 			new_config = {}
 			if RunningConfig[Ccluster_address] != config[Ccluster_address] or RunningConfig[Ccluster_port] != config[Ccluster_port]
 		    	new_config[Ccluster_server] = EventMachine.start_server(
@@ -569,7 +619,8 @@ module Swiftcore
 					
 					# For each incoming entry, do setup.
 					new_config[Cincoming] = {}
-					m[Cincoming].each do |p|
+					m[Cincoming].each do |p_|
+						p = p_.intern
 						new_config[Cincoming][p] = {}
 						ProxyBag.add_incoming_mapping(hash,p)
 						
@@ -580,15 +631,30 @@ module Swiftcore
 						end
 						
 						if m[Credeployable]
-							ProxyBag.add_incoming_redeployable(p, m[Credeployment_sizelimit] || 16384)
+							ProxyBag.add_incoming_redeployable(m[Credeployment_sizelimit] || 16384,p)
 						else
 							ProxyBag.remove_incoming_redeployable(p)
 						end
 						
+						if m.has_key?(Ckey)
+							ProxyBag.set_key(hash,m[Ckey])
+						else
+							ProxyBag.set_key(hash,C_empty)
+						end
+						
+						if m.has_key?(CCacheExtensions) or m.has_key?(CCacheDirectory)
+							require 'swiftcore/Swiftiply/support_pagecache'
+							ProxyBag.add_suffix_list((m[CCacheExtensions] || ProxyBag.const_get(:DefaultSuffixes)),p)
+							ProxyBag.add_cache_dir((c[CCacheDirectory] || ProxyBag.const_get(:DefaultCacheDir)),p)
+						else
+							ProxyBag.remove_suffix_list(p) if ProxyBag.respond_to?(:remove_suffix_list)
+							ProxyBag.remove_cache_dir(p) if ProxyBag.respond_to?(:remove_cache_dir)
+						end
+							
 						m[Coutgoing].each do |o|
 							ProxyBag.default_name = p if m[Cdefault]
 							if @existing_backends.has_key?(o)
-								new_config[Coutgoing][o] = RunningConfig[Coutgoing][o]
+								new_config[Coutgoing][o] ||= RunningConfig[Coutgoing][o]
 								next
 							else
 								@existing_backends[o] = true
@@ -615,7 +681,7 @@ module Swiftcore
 			new_config[Cuser] = config[Cuser]
 			
 			ProxyBag.server_unavailable_timeout ||= config[Ctimeout]
-			ProxyBag.key = key
+			ProxyBag.chunked_encoding_threshold = config[Cchunked_encoding_threshold] || 16384
 			
 			unless RunningConfig[:initialized]
 				EventMachine.add_periodic_timer(2) { ProxyBag.expire_clients }
