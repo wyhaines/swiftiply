@@ -25,7 +25,7 @@ Package.setup("1.0") {
 	#File.rename("#{Config::CONFIG["bindir"]}/mongrel_rails","#{Config::CONFIG["bindir"]}/mongrel_rails.orig")
 	bin "bin/mongrel_rails"
 
-#	unit_test "test/TC_Swiftiply.rb"
+	unit_test "test/TC_ProxyBag.rb"
 	
 	true
 }
