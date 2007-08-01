@@ -126,10 +126,7 @@ module Mongrel
 				response = HttpResponse.new(client)
 
 				# Process each handler in registered order until we run out or one finalizes the response.
-				handlers.each do |handler|
-					handler.process(request, response)
-					break if response.done
-				end
+				dispatch_to_handlers(handlers,request,response)
 
 				# And finally, if nobody closed the response off, we finalize it.
 				unless response.done
@@ -141,6 +138,13 @@ module Mongrel
 				# Didn't find it, return a stock 404 response.
 				client.send_data(Const::ERROR_404_RESPONSE)
 				client.close_connection_after_writing
+			end
+		end
+		
+		def dispatch_to_handlers(handlers,request,response)
+			handlers.each do |handler|
+				handler.process(request, response)
+				break if response.done
 			end
 		end
 	end
@@ -186,6 +190,30 @@ module Mongrel
 			send_header
 			send_body
 			@socket.close_connection_after_writing
+		end
+	end
+	
+	class Configurator
+		# This version fixes a bug in the regular Mongrel version by adding
+		# initialization of groups.
+		def change_privilege(user, group)
+			if user and group
+				log "Initializing groups for {#user}:{#group}."
+				Process.initgroups(user,Etc.getgrnam(group).gid)
+			end
+			
+			if group
+				log "Changing group to #{group}."
+				Process::GID.change_privilege(Etc.getgrnam(group).gid)
+			end
+			
+			if user
+				log "Changing user to #{user}."
+				Process::UID.change_privilege(Etc.getpwnam(user).uid)
+			end
+		rescue Errno::EPERM
+			log "FAILED to change user:group #{user}:#{group}: #$!"
+			exit 1
 		end
 	end
 end

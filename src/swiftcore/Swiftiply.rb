@@ -34,6 +34,7 @@ module Swiftcore
 		Cdocroot = 'docroot'.freeze
 		Cepoll = 'epoll'.freeze
 		Cepoll_descriptors = 'epoll_descriptors'.freeze
+		Cgroup = 'group'.freeze
 		Chost = 'host'.freeze
 		Cincoming = 'incoming'.freeze
 		Ckeepalive = 'keepalive'.freeze
@@ -181,13 +182,13 @@ module Swiftcore
 					client_name = clnt.name
 					dr = @docroot_map[client_name]
 					if path = find_static_file(dr,path_info,client_name)
-						ct = ::MIME::Types.type_for(path).first
+						ct = ::MIME::Types.type_for(path).first || Caos
 						fsize = File.size?(path)
 						if fsize > @chunked_encoding_threshold
-							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct ? ct.content_type : Caos}\r\nTransfer-encoding: chunked\r\n\r\n"
+							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nTransfer-encoding: chunked\r\n\r\n"
 							EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing}
 						else
-							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct ? ct.content_type : Caos}\r\nContent-length: #{fsize}\r\n\r\n"
+							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nContent-length: #{fsize}\r\n\r\n"
 							clnt.send_file_data path
 							clnt.close_connection_after_writing
 						end
@@ -240,16 +241,12 @@ module Swiftcore
 				# client to service if there are no clients waiting to be serviced.
 
 				def add_server srvr
-					# Unshift is slow if there are a lot of elements.
 					@server_q[srvr.name].unshift(srvr) unless match_server_to_client_now(srvr)
 				end
 
 				# Deletes the provided server from the server queue.
 
 				def remove_server srvr
-					# Delete is also slow if there are a lot of elements.
-					# TODO: explore a different data structure -- a linked list with a
-					# hash index, or an rbtree?
 					@server_q[srvr.name].delete srvr
 				end
 
@@ -369,8 +366,7 @@ module Swiftcore
 
 			def initialize *args
 				@data = []
-				@name = nil
-				@uri = nil
+				@name = @uri = nil
 				super
 			end
 
@@ -488,8 +484,8 @@ module Swiftcore
 			# the rest of the content.  If a Content-Length header is present,
 			# that is used to determine how much data to expect.  Otherwise,
 			# if 'Transfer-encoding: chunked' is present, assume chunked
-			# encoding.  Otherwise be paranoid and assume a content length
-			# of 0.
+			# encoding.  Otherwise be paranoid; something isn't the way we like
+			# it to be.
 
 			def receive_data data
 				unless @initialized
@@ -584,7 +580,9 @@ module Swiftcore
 
 		def self.run(config)
 			@existing_backends = {}
-			EventMachine.epoll if config[Cepoll]
+			# Default is to assume we want to try to turn epoll support on.  EM
+			# ignores this on platforms that don't support it, so this is safe.
+			EventMachine.epoll unless config.has_key?(Cepoll) and !config[Cepoll]
 			EventMachine.set_descriptor_table_size(4096 || config[Cepoll_descriptors]) if config[Cepoll]
 			EventMachine.run do
 				em_config(config)
@@ -595,12 +593,23 @@ module Swiftcore
 		def self.em_config(config)
 			new_config = {}
 			if RunningConfig[Ccluster_address] != config[Ccluster_address] or RunningConfig[Ccluster_port] != config[Ccluster_port]
-		    	new_config[Ccluster_server] = EventMachine.start_server(
+				begin
+			    	new_config[Ccluster_server] = EventMachine.start_server(
                 	config[Ccluster_address],
                 	config[Ccluster_port],
                 	ClusterProtocol)
-					new_config[Ccluster_address] = config[Ccluster_address]
-					new_config[Ccluster_port] = config[Ccluster_port]
+				rescue RuntimeError => e
+					advice = ''
+					if config[Ccluster_port] < 1024
+						advice << 'Make sure you have the correct permissions to use that port, and make sure there is nothing else running on that port.'
+					else
+						advice << 'Make sure there is nothing else running on that port.'
+					end
+					advice << "  The original error was:  #{e}"
+					raise EMStartServerError("The listener on #{config[Ccluster_address]}#{config[Ccluster_port]} could not be started.\n#{advice}")
+				end
+				new_config[Ccluster_address] = config[Ccluster_address]
+				new_config[Ccluster_port] = config[Ccluster_port]
 		    	RunningConfig[Ccluster_server].stop_server if RunningConfig.has_key?(Ccluster_server)
 			else
 				new_config[Ccluster_server] = RunningConfig[Ccluster_server]
@@ -661,7 +670,18 @@ module Swiftcore
 								backend_class = Class.new(BackendProtocol)
 								backend_class.bname = hash
 								host, port = o.split(/:/,2)
-								new_config[Coutgoing][o] = EventMachine.start_server(host, port.to_i, backend_class)
+								begin
+									new_config[Coutgoing][o] = EventMachine.start_server(host, port.to_i, backend_class)
+								rescue RuntimeError => e
+									advice = ''
+									if port.to_i < 1024
+										advice << 'Make sure you have the correct permissions to use that port, and make sure there is nothing else running on that port.'
+									else
+										advice << 'Make sure there is nothing else running on that port.'
+									end
+									advice << "  The original error was:  #{e}"
+									raise EMStartServerError("The listener on #{host}#{port} could not be started.\n#{advice}")
+								end
 							end
 						end
 						
@@ -677,8 +697,11 @@ module Swiftcore
 					# This is a future TODO item.	
 				end
 			end
-			EventMachine.set_effective_user = config[Cuser] if config[Cuser] and RunningConfig[Cuser] != config[Cuser]
+
+			#EventMachine.set_effective_user = config[Cuser] if config[Cuser] and RunningConfig[Cuser] != config[Cuser]
+			run_as(config[Cuser],config[Cgroup]) if (config[Cuser] and RunningConfig[Cuser] != config[Cuser]) or (config[Cgroup] and RunningConfig[Cgroup] != config[Cgroup])
 			new_config[Cuser] = config[Cuser]
+			new_config[Cgroup] = config[Cgroup]
 			
 			ProxyBag.server_unavailable_timeout ||= config[Ctimeout]
 			ProxyBag.chunked_encoding_threshold = config[Cchunked_encoding_threshold] || 16384
@@ -690,6 +713,18 @@ module Swiftcore
 			end
 			
 			RunningConfig.replace new_config
+		end
+		
+		
+		# This can be used to change the effective user and group that
+		# Swiftiply is running as.
+		
+		def self.run_as(user = "nobody", group = "nobody")
+			Process.initgroups(user,Etc.getgrnam(group).gid) if user and group
+			::Process::GID.change_privilege(Etc.getgrnam(group).gid) if group
+			::Process::UID.change_privilege(Etc.getpwnam(user).uid) if user
+		rescue Errno::EPERM
+			raise "Failed to change the effective user to #{user} and the group to #{group}"
 		end
 	end
 end

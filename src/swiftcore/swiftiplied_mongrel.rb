@@ -21,31 +21,7 @@ module Mongrel
 	C0s = [0,0,0,0].freeze unless const_defined?(:C0s)
 	CCCCC = 'CCCC'.freeze unless const_defined?(:CCCCC)
 
-	class MongrelProtocol < EventMachine::Connection
-		def self.connect(hostname = nil,port = nil)
-			@hostname ||= hostname
-			@port ||= port
-
-			::EventMachine.connect(@hostname, @port, self) do |conn|
-				conn.set_comm_inactivity_timeout 60
-			end
-		end
-
-		def self.hostname
-			@hostname
-		end
-
-		def self.port
-			@port
-		end
-
-		def connection_completed
-			@completed = true
-			ip = nil
-			ip = Socket.gethostbyname(@hostname)[3].unpack(CCCCC) rescue ip = C0s
-			id = 'swiftclient' << ip.collect {|x| sprintf('%02s',x.to_i.to_s(16)).sub(' ','0')}.join << sprintf('%04s',@port.to_i.to_s(16)).gsub(' ','0')
-			send_data id
-		end
+	class MongrelProtocol < SwiftiplyClientProtocol
 
 		def post_init
 			@parser = HttpParser.new
@@ -54,14 +30,6 @@ module Mongrel
 			@request = nil
 			@request_len = nil
 			@linebuffer = ''
-		end
-
-		def unbind
-			if @completed
-				self.class.connect
-			else
-				::EventMachine.add_timer(rand(4)) {self.class.connect}
-			end
 		end
 
 		def receive_data data
@@ -163,10 +131,7 @@ module Mongrel
 				response = HttpResponse.new(client)
 
 				# Process each handler in registered order until we run out or one finalizes the response.
-				handlers.each do |handler|
-					handler.process(request, response)
-					break if response.done
-				end
+				dispatch_to_handlers(handlers,request,response)
 
 				# And finally, if nobody closed the response off, we finalize it.
 				unless response.done
@@ -183,6 +148,14 @@ module Mongrel
 				response.finished
 			end
 		end
+		
+		def dispatch_to_handlers(handlers,request,response)
+			handlers.each do |handler|
+				handler.process(request, response)
+				break if response.done
+			end
+		end
+		
 	end
 
 	class HttpRequest
@@ -221,6 +194,30 @@ module Mongrel
 			send_status
 			send_header
 			send_body
+		end
+	end
+	
+	class Configurator
+		# This version fixes a bug in the regular Mongrel version by adding
+		# initialization of groups.
+		def change_privilege(user, group)
+			if user and group
+				log "Initializing groups for {#user}:{#group}."
+				Process.initgroups(user,Etc.getgrnam(group).gid)
+			end
+			
+			if group
+				log "Changing group to #{group}."
+				Process::GID.change_privilege(Etc.getgrnam(group).gid)
+			end
+			
+			if user
+				log "Changing user to #{user}."
+				Process::UID.change_privilege(Etc.getpwnam(user).uid)
+			end
+		rescue Errno::EPERM
+			log "FAILED to change user:group #{user}:#{group}: #$!"
+			exit 1
 		end
 	end
 end
