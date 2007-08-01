@@ -1,5 +1,3 @@
-# -*- coding: ISO-8859-1 -*-
-
 # This is a very simple Swiftiply client.  All that is does is echo whatever
 # request it receives as its response.
 
