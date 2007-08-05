@@ -56,3 +56,16 @@ module SwiftcoreTestSupport
 	end
 
 end
+
+class EMConnectionMock
+	attr_accessor :uri, :name
+	
+	def send_data data
+	end
+	
+	def send_file_data filename
+	end
+	
+	def close_connection; end
+	def close_connection_after_writing; end
+end

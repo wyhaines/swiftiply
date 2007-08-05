@@ -87,11 +87,12 @@ module Mongrel
 	end
 
 	class HttpServer
-		def initialize(host, port, num_processors=(2**30-1), timeout=0)
+		def initialize(host, port, num_processors=(2**30-1), timeout=0,key = '')
 			@socket = nil
 			@classifier = URIClassifier.new
 			@host = host
 			@port = port
+			@key = key
 			@workers = ThreadGroup.new
 			@timeout = timeout
 			@num_processors = num_processors
@@ -105,7 +106,7 @@ module Mongrel
 			@acceptor = Thread.new do
 				EventMachine.run do
 					begin
-						MongrelProtocol.connect(@host,@port)
+						MongrelProtocol.connect(@host,@port,@key)
 					rescue StopServer
 						EventMachine.stop_event_loop
 					end

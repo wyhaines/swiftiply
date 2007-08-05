@@ -21,8 +21,8 @@ module Swiftcore
 		C_slash = '/'.freeze
 		C_slashindex_html = '/index.html'.freeze
 		Caos = 'application/octet-stream'.freeze
-		CCacheDirectory = 'CacheDirectory'.freeze
-		CCacheExtensions = 'CacheExtensions'.freeze
+		Ccache_directory = 'cache_directory'.freeze
+		Ccache_extensions = 'cache_extensions'.freeze
 		Ccluster_address = 'cluster_address'.freeze
 		Ccluster_port = 'cluster_port'.freeze
 		Ccluster_server = 'cluster_server'.freeze
@@ -54,6 +54,8 @@ module Swiftcore
 		
 		RunningConfig = {}
 
+		class EMStartServerError < RuntimeError; end
+		
 		# The ProxyBag is a class that holds the client and the server queues,
 		# and that is responsible for managing them, matching them, and expiring
 		# them, if necessary.
@@ -71,6 +73,7 @@ module Swiftcore
 			@redeployable_map = {}
 			@keys = {}
 			@demanding_clients = Hash.new {|h,k| h[k] = []}
+			@hitcounters = Hash.new {|h,k| h[k] = 0}
 
 			class << self
 
@@ -100,6 +103,10 @@ module Swiftcore
 					@reverse_id_map.delete(what)
 				end
 
+				def incoming_mapping(name)
+					@incoming_map[name]
+				end
+				
 				def add_incoming_mapping(hashcode,name)
 					@incoming_map[name] = hashcode
 				end
@@ -196,7 +203,7 @@ module Swiftcore
 					else
 						false
 					end
-				rescue Object => e
+				rescue Object
 					clnt.close_connection_after_writing
 					false
 				end
@@ -366,6 +373,7 @@ module Swiftcore
 
 			def initialize *args
 				@data = []
+				@data_pos = 0
 				@name = @uri = nil
 				super
 			end
@@ -380,7 +388,9 @@ module Swiftcore
 					if data =~ /^Host:\s*([^\r\n:]*)/
 						# NOTE: Should I be using intern for this?  It might not
 						# be a good idea.
+
 						@name = $1.intern
+						@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
 						ProxyBag.add_frontend_client self
 						push
 					elsif data =~ /\r\n\r\n/
@@ -416,9 +426,13 @@ module Swiftcore
 						end
 					else
 						# redeployable data push
-						(@data.length - 1).downto(@data_pos) {|p| d = @data[p]; @associate.send_data d; @data_len += d.length}
+						(@data.length - 1 - @data_pos).downto(0) {|p| d = @data[p]; @associate.send_data d; @data_len += d.length}
 						@data_pos = @data.length
-						@redeployable = false if @data_len > @redeployable
+
+						if @data_len > @redeployable
+							@redeployable = false
+							@data.clear
+						end
 					end
 				end
 			end
@@ -491,7 +505,7 @@ module Swiftcore
 				unless @initialized
 					preamble = data.slice!(0..24)
 					
-					keylen = preamble[23..24].to_i
+					keylen = preamble[23..24].to_i(16)
 					keylen = 0 if keylen < 0
 					key = keylen > 0 ? data.slice!(0..(keylen - 1)) : C_empty
 					if preamble[0..10] == Cswiftclient and key == ProxyBag.get_key(@name)
@@ -605,8 +619,8 @@ module Swiftcore
 					else
 						advice << 'Make sure there is nothing else running on that port.'
 					end
-					advice << "  The original error was:  #{e}"
-					raise EMStartServerError("The listener on #{config[Ccluster_address]}#{config[Ccluster_port]} could not be started.\n#{advice}")
+					advice << "  The original error was:  #{e}\n"
+					raise EMStartServerError.new("The listener on #{config[Ccluster_address]}:#{config[Ccluster_port]} could not be started.\n#{advice}")
 				end
 				new_config[Ccluster_address] = config[Ccluster_address]
 				new_config[Ccluster_port] = config[Ccluster_port]
@@ -651,10 +665,10 @@ module Swiftcore
 							ProxyBag.set_key(hash,C_empty)
 						end
 						
-						if m.has_key?(CCacheExtensions) or m.has_key?(CCacheDirectory)
+						if m.has_key?(Ccache_extensions) or m.has_key?(Ccache_directory)
 							require 'swiftcore/Swiftiply/support_pagecache'
-							ProxyBag.add_suffix_list((m[CCacheExtensions] || ProxyBag.const_get(:DefaultSuffixes)),p)
-							ProxyBag.add_cache_dir((c[CCacheDirectory] || ProxyBag.const_get(:DefaultCacheDir)),p)
+							ProxyBag.add_suffix_list((m[Ccache_extensions] || ProxyBag.const_get(:DefaultSuffixes)),p)
+							ProxyBag.add_cache_dir((m[Ccache_directory] || ProxyBag.const_get(:DefaultCacheDir)),p)
 						else
 							ProxyBag.remove_suffix_list(p) if ProxyBag.respond_to?(:remove_suffix_list)
 							ProxyBag.remove_cache_dir(p) if ProxyBag.respond_to?(:remove_cache_dir)
@@ -679,8 +693,8 @@ module Swiftcore
 									else
 										advice << 'Make sure there is nothing else running on that port.'
 									end
-									advice << "  The original error was:  #{e}"
-									raise EMStartServerError("The listener on #{host}#{port} could not be started.\n#{advice}")
+									advice << "  The original error was:  #{e}\n"
+									raise EMStartServerError.new("The listener on #{host}:#{port} could not be started.\n#{advice}")
 								end
 							end
 						end

@@ -23,7 +23,7 @@ require 'socket'
 
 class SwiftiplyClientProtocol < EventMachine::Connection
 	
-	attr_accessor :hostname, :port, :ip, :id
+	attr_accessor :hostname, :port, :key, :ip, :id
 	
 	C_dotdotdot = '...'.freeze
 	C0s = [0,0,0,0].freeze
@@ -32,11 +32,14 @@ class SwiftiplyClientProtocol < EventMachine::Connection
 	DefaultHeaders = {'Connection' => 'close', 'Content-Type' => 'text/plain'}
 	
 	def self.connect(hostname = nil,port = nil,key = '')
+		key = key.to_s
+
 		connection = ::EventMachine.connect(hostname, port, self) do |conn|
 			conn.hostname = hostname
 			conn.port = port
+			conn.key = key
 			ip = conn.ip = conn.__get_ip(hostname)
-			conn.id = 'swiftclient' << ip.collect {|x| sprintf('%02s',x.to_i.to_s(16)).sub(' ','0')}.join << sprintf('%04s',port.to_i.to_s(16)).gsub(' ','0') << key.length << key
+			conn.id = 'swiftclient' << ip.collect {|x| sprintf('%02x',x.to_i)}.join << sprintf('%04x',port.to_i)<< sprintf('%02x',key.length) << key
 			conn.set_comm_inactivity_timeout inactivity_timeout
 		end
 	end
@@ -54,7 +57,7 @@ class SwiftiplyClientProtocol < EventMachine::Connection
 	end
 
 	def unbind
-		::EventMachine.add_timer(rand(2)) {self.class.connect(@hostname,@port)}
+		::EventMachine.add_timer(rand(2)) {self.class.connect(@hostname,@port,@key)}
 	end
 	
 	def send_http_data(data,h = {},status = 200, msg = C_dotdotdot)
@@ -62,7 +65,7 @@ class SwiftiplyClientProtocol < EventMachine::Connection
 		headers[CContentLength] = data.length
 		header_string = ''
 		headers.each {|k,v| header_string << "#{k}: #{v}\r\n"}
-		send_data("HTTP/1.1 #{status} #{msg}\r\n#{header_string}\r\n\r\n#{data}")
+		send_data("HTTP/1.1 #{status} #{msg}\r\n#{header_string}\r\n#{data}")
 	end
 	
 	def __get_ip hostname

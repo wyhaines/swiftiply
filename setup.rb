@@ -26,6 +26,6 @@ Package.setup("1.0") {
 	bin "bin/mongrel_rails"
 
 	unit_test "test/TC_ProxyBag.rb"
-	unit_test "text/TC_Swiftiply.rb"
+	unit_test "test/TC_Swiftiply.rb"
 	true
 }

@@ -10,8 +10,9 @@ module Swiftcore
 	module Swiftiply
 		class ProxyBag
 			DefaultCacheDir = 'public'.freeze
-			DefaultSuffixes = ['.html'.freeze]
+			DefaultSuffixes = ['html'.freeze]
 			@suffix_list = {}
+			@cache_dir = {}
 			
 			class << self
 				def add_suffix_list(list,name)
@@ -36,12 +37,18 @@ module Swiftcore
 						path
 					elsif @suffix_list.has_key?(client_name)
 						path = File.join(dr,@cache_dir[client_name],path_info)
-						for suffix in @suffix_list[client_name] do
-							p = "#{path}.#{suffix}"
-							return p if FileTest.exist?(p) and FileTest.file?(p)
+						if FileTest.exist?(path) and FileTest.file?(path)
+							path
+						else
+							for suffix in @suffix_list[client_name] do
+								p = "#{path}.#{suffix}"
+								return p if FileTest.exist?(p) and FileTest.file?(p)
+							end
+							nil
 						end
+					else
+						nil
 					end
-					nil
 				end
 			end
 		end
