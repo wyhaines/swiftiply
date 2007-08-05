@@ -1,5 +1,5 @@
 # This is a very simple, naive Swiftiply client.  All that is does is echo whatever
-# request it receives as its response.
+# request it receives as its response, in a very simplistic way.
 
 require 'swiftcore/Swiftiply/swiftiply_client'
 

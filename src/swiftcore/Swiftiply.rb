@@ -223,12 +223,12 @@ module Swiftcore
 				# waiting to be serviced if there's no server available to handle
 				# it right now.
 
-				def add_frontend_client clnt
+				def add_frontend_client(clnt,data_q,data)
 					clnt.create_time = @ctime
-
 					clnt.data_pos = clnt.data_len = 0 if clnt.redeployable = @redeployable_map[clnt.name]
 
 					unless @docroot_map.has_key?(clnt.name) and serve_static_file(clnt)
+						data_q.unshift data
 						unless match_client_to_server_now(clnt)
 							if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
 								# NOTE: I hate using unshift and delete on arrays
@@ -240,6 +240,25 @@ module Swiftcore
 							else
 								@client_q[@incoming_map[clnt.name]].unshift(clnt)
 							end
+						end
+						#clnt.push ## wasted call, yes?
+					end
+				end
+				
+				def rebind_frontend_client(clnt)
+					clnt.create_time = @ctime
+					clnt.data_pos = clnt.data_len = 0
+					
+					unless match_client_to_server_now(clnt)
+						if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
+							# NOTE: I hate using unshift and delete on arrays
+							# in this code.  Look at switching to something
+							# with a faster profile for push/pull from both
+							# ends as well as deletes.  There has to be
+							# something.
+							@demanding_clients[$1].unshift clnt
+						else
+							@client_q[@incoming_map[clnt.name]].unshift(clnt)
 						end
 					end
 				end
@@ -363,8 +382,6 @@ module Swiftcore
 
 			Crn = "\r\n".freeze
 			Crnrn = "\r\n\r\n".freeze
-			Rrnrn = /\r\n\r\n/
-			R_colon = /:/
 			C_blank = ''.freeze
 
 			# Initialize the @data array, which is the temporary storage for blocks
@@ -379,24 +396,22 @@ module Swiftcore
 			end
 
 			def receive_data data
-				@data.unshift data
 				if @name
+					@data.unshift data
 					push
 				else
-					data =~ /\s([^\s\?]*)/
-					@uri ||= $1
-					if data =~ /^Host:\s*([^\r\n:]*)/
+					if data =~ /^Host:\s*([^\r:]*)/
 						# NOTE: Should I be using intern for this?  It might not
 						# be a good idea.
-
 						@name = $1.intern
+						
+						data =~ /\s([^\s\?]*)/
+						@uri = $1
 						@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
-						ProxyBag.add_frontend_client self
-						push
+						ProxyBag.add_frontend_client(self,@data,data)
 					elsif data =~ /\r\n\r\n/
 						@name = ProxyBag.default_name
-						ProxyBag.add_frontend_client self
-						push
+						ProxyBag.add_frontend_client(self,@data,data)
 					end
 				end
 			end
@@ -421,9 +436,8 @@ module Swiftcore
 				if @associate
 					unless @redeployable
 						# normal data push
-						while data = @data.pop
-							@associate.send_data data
-						end
+						data = nil
+						@associate.send_data(data) while data = @data.pop
 					else
 						# redeployable data push
 						(@data.length - 1 - @data_pos).downto(0) {|p| d = @data[p]; @associate.send_data d; @data_len += d.length}
@@ -466,7 +480,6 @@ module Swiftcore
 
 			C0rnrn = "0\r\n\r\n".freeze
 			Crnrn = "\r\n\r\n".freeze
-			Rrnrn = /\r\n\r\n/
 
 			def initialize *args
 				@name = self.class.bname
@@ -490,7 +503,7 @@ module Swiftcore
 			def setup
 				@headers = ''
 				@headers_completed = false
-				@content_length = nil
+				#@content_length = nil
 				@content_sent = 0
 			end
 
@@ -521,9 +534,9 @@ module Swiftcore
 				unless @headers_completed 
 					if data =~ /\r\n\r\n/
 						@headers_completed = true
-						h,d = data.split(Rrnrn,2)
+						h,data = data.split(/\r\n\r\n/,2)
 						@headers << h << Crnrn
-						if @headers =~ /Content-[Ll]ength:\s*([^\r\n]+)/
+						if @headers =~ /Content-[Ll]ength:\s*([^\r]+)/
 							@content_length = $1.to_i
 						elsif @headers =~ /Transfer-encoding:\s*chunked/
 							@content_length = nil
@@ -531,7 +544,6 @@ module Swiftcore
 							@content_length = 0
 						end
 						@associate.send_data @headers
-						data = d
 					else
 						@headers << data
 					end
@@ -540,15 +552,14 @@ module Swiftcore
 				if @headers_completed
 					@associate.send_data data
 					@content_sent += data.length
-					if @content_length and @content_sent >= @content_length
+					if @content_length and @content_sent >= @content_length or data[-6..-1] == C0rnrn
 						@associate.close_connection_after_writing
 						@associate = nil
-						setup
-						ProxyBag.add_server self
-					elsif data[-6..-1] == C0rnrn
-						@associate.close_connection_after_writing
-						@associate = nil
-						setup
+						@headers = ''
+						@headers_completed = false
+						#@content_length = nil
+						@content_sent = 0
+						#setup
 						ProxyBag.add_server self
 					end
 				end
@@ -571,7 +582,7 @@ module Swiftcore
 					else
 						@associate.associate = nil
 						@associate.setup_for_redeployment
-						ProxyBag.add_frontend_client(@associate)
+						ProxyBag.rebind_frontend_client(@associate)
 					end
 				else
 					ProxyBag.remove_server(self)

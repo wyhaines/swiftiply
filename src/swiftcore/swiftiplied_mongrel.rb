@@ -7,6 +7,8 @@
 begin
 	load_attempted ||= false
 	require 'eventmachine'
+	require 'swiftcore/Swiftiply/swiftiply_client'
+	require 'mongrel'
 rescue LoadError
 	unless load_attempted
 		load_attempted = true
@@ -14,8 +16,6 @@ rescue LoadError
 		retry
 	end
 end
-
-require 'mongrel'
 
 module Mongrel
 	C0s = [0,0,0,0].freeze unless const_defined?(:C0s)

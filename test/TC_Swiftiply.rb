@@ -95,8 +95,16 @@ ECONF
 		assert_equal(79000,response.body.length)
 		
 		# Hit it a bunch of times.
-		5000.times { response = get_url('127.0.0.1',29998,smallfile_name) }
-		# And it's still correct, right?
+		
+		ab = `which ab`.chomp
+		unless ab == ''
+			r = `#{ab} -n 10000 -c 25 http://127.0.0.1:29998/#{smallfile_name}`
+			r =~ /^(Requests per second.*)$/
+			puts "10k files, concurrency of 25\n#{$1}"
+		end
+		
+		# And it is still correct?
+		response = get_url('127.0.0.1',29998,smallfile_name)
 		assert_equal("alfalfa leafcutter bee\n",response.body)
 	end
 
@@ -127,7 +135,7 @@ ECONF
 		
 		conf_file = File.join(dc,'test_serve_static_file_from_cachedir.conf')
 		File.open(conf_file,'w+') do |fh|
-			conf = ConfBase.dup
+			conf = YAML.load(ConfBase.to_yaml)
 			conf['map'].first['docroot'] = 'test_serve_static_file_from_cachedir'
 			conf['map'].first['cache_directory'] = 'public'
 			conf['map'].first['cache_extensions'] = ['html','htm','cgi']
@@ -210,7 +218,7 @@ ECONF
 		
 		conf_file = File.join(dc,'test_redeployable.conf')
 		File.open(conf_file,'w+') do |fh|
-			conf = ConfBase.dup
+			conf = YAML.load(ConfBase.to_yaml)
 			conf['map'].first['redeployable'] = 'true'
 			fh.write conf.to_yaml
 		end
@@ -292,7 +300,7 @@ ECONF
 		
 		conf_file = File.join(dc,'test_serve_normal_proxy_with_authentication.conf')
 		File.open(conf_file,'w+') do |fh|
-			conf = ConfBase.dup
+			conf = YAML.load(ConfBase.to_yaml)
 			conf['map'].first['key'] = 'abcdef1234'
 			fh.write conf.to_yaml
 		end
@@ -333,4 +341,74 @@ ECONF
 			sleep 1
 		end	
 	end
+	
+	def test_evented_mongrel
+		puts "\nTesting Evented Mongrel"
+		
+		assert_nothing_raised("setup failed") do
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => File.join('TC_Swiftiply','mongrel'),
+				:cmd => ["#{Ruby} -I../../../src evented_hello.rb"])
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => File.join('TC_Swiftiply','mongrel'),
+				:cmd => ["#{Ruby} -I../../../src threaded_hello.rb"])
+		end
+		
+		sleep 1
+		
+		response = get_url('127.0.0.1',29998,'/hello')
+		assert_equal("hello!\n",response.body)
+		
+		response = get_url('127.0.0.1',29998,'/dir')
+		assert_equal("<html><head><title>Directory Listing",response.body[0..35])
+		
+		ab = `which ab`.chomp
+		unless ab == ''
+			puts "\nThreaded Mongrel..."
+			rt = `#{ab} -n 10000 -c 25 http://127.0.0.1:29997/hello`
+			rt =~ /^(Requests per second.*)$/
+			rts = $1
+			puts "\nEvented Mongrel..."
+			re = `#{ab} -n 10000 -c 25 http://127.0.0.1:29998/hello`
+			re =~ /^(Requests per second.*)$/
+			res = $1
+			puts "\nThreaded Mongrel, no proxies, concurrency of 25\n#{rts}"
+			puts "Evented Mongrel, no proxies, concurrency of 25\n#{res}"
+			sleep 1
+		end
+	end
+	
+	def test_swiftiplied_mongrel
+		puts "\nTesting Swiftiplied Mongrel"
+
+		dc = File.join(Dir.pwd,'TC_Swiftiply')
+		dr = File.join(dc,'test_serve_normal_proxy')
+		
+		conf_file = File.join(dc,'test_serve_mongrel.conf')
+		File.open(conf_file,'w+') {|fh| fh.write ConfBase.to_yaml}
+		DeleteQueue << conf_file
+		
+		assert_nothing_raised("setup failed") do
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src ../../bin/swiftiply -c test_serve_mongrel.conf"])
+			sleep 1
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => File.join('TC_Swiftiply','mongrel'),
+				:cmd => ["#{Ruby} -I../../../src swiftiplied_hello.rb"])
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => File.join('TC_Swiftiply','mongrel'),
+				:cmd => ["#{Ruby} -I../../../src swiftiplied_hello.rb"])
+			sleep 1
+		end
+		
+		response = get_url('127.0.0.1',29998,'/hello')
+		assert_equal("hello!\n",response.body)
+		
+		response = get_url('127.0.0.1',29998,'/dir')
+		assert_equal("<html><head><title>Directory Listing",response.body[0..35])
+		
+		ab = `which ab`.chomp
+		unless ab == ''
+			r = `#{ab} -n 10000 -c 25 http://127.0.0.1:29998/hello`
+			r =~ /^(Requests per second.*)$/
+			puts "Swiftiply -> Swiftiplied Mongrel, concurrency of 25\n#{$1}"
+		end
+	end
+	
 end
