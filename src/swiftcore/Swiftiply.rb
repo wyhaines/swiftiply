@@ -2,7 +2,7 @@ begin
 	load_attempted ||= false
 	require 'digest/sha2'
 	require 'eventmachine'
-	require 'fastfilereader'
+	require 'fastfilereaderext'
 	require 'mime/types'
 rescue LoadError => e
 	unless load_attempted
@@ -303,12 +303,16 @@ module Swiftcore
 
 				def match_client_to_server_now(client)
 					sq = @server_q[@incoming_map[client.name]]
-					if client.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/ and sidx = sq.index(@reverse_id_map[$1])
-						server = sq.delete_at(sidx)
-						server.associate = client
-						client.associate = server
-						client.push
-						true
+					if client.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
+						if sidx = sq.index(@reverse_id_map[$1])
+							server = sq.delete_at(sidx)
+							server.associate = client
+							client.associate = server
+							client.push
+							true
+						else
+							false
+						end
 					elsif server = sq.pop
 						server.associate = client
 						client.associate = server
@@ -437,10 +441,15 @@ module Swiftcore
 					unless @redeployable
 						# normal data push
 						data = nil
-						@associate.send_data(data) while data = @data.pop
+						@associate.send_data data while data = @data.pop
 					else
-						# redeployable data push
-						(@data.length - 1 - @data_pos).downto(0) {|p| d = @data[p]; @associate.send_data d; @data_len += d.length}
+						# redeployable data push; just send the stuff that has
+						# not already been sent.
+						(@data.length - 1 - @data_pos).downto(0) do |p|
+							d = @data[p]
+							@associate.send_data d
+							@data_len += d.length
+						end
 						@data_pos = @data.length
 
 						if @data_len > @redeployable
@@ -506,7 +515,7 @@ module Swiftcore
 				#@content_length = nil
 				@content_sent = 0
 			end
-
+			
 			# Receive data from the backend process.  Headers are parsed from
 			# the rest of the content.  If a Content-Length header is present,
 			# that is used to determine how much data to expect.  Otherwise,
