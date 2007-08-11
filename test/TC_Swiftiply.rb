@@ -411,4 +411,48 @@ ECONF
 		end
 	end
 	
+	def test_HUP
+		puts "\nTesting HUP handling"
+		dc = File.join(Dir.pwd,'TC_Swiftiply')
+		dr = File.join(dc,'test_serve_static_file')
+		
+		conf_file = File.join(dc,'test_HUP.conf')
+		File.open(conf_file,'w+') do |fh|
+			conf = YAML.load(ConfBase.to_yaml)
+			conf['map'].first.delete('docroot')
+			fh.write conf.to_yaml
+		end
+		DeleteQueue << conf_file
+		
+		smallfile_name = "xyzzy"
+		smallfile_path = File.join(dr,smallfile_name)
+		File.open(smallfile_path,'w') {|fh| fh.puts "alfalfa leafcutter bee"}
+		DeleteQueue << smallfile_path
+		
+		swiftiply_pid = nil
+		assert_nothing_raised("setup failed") do
+			KillQueue << swiftiply_pid = SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src ../../bin/swiftiply -c test_HUP.conf"])
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src ../../bin/echo_client 127.0.0.1:29999"])
+			sleep 1
+		end
+
+		# Normal request for a sanity check.
+		response = get_url('127.0.0.1',29998,'/xyzzy')
+		assert_equal("GET /xyzzy HTTP/1.1\r\nAccept: */*\r\nHost: 127.0.0.1:29998\r\n\r\n",response.body)
+		
+		# Now rewrite the conf file to be a little different.
+		File.open(conf_file,'w+') {|fh| fh.write ConfBase.to_yaml }
+		
+		# Reload the config
+		Process.kill 'SIGHUP',swiftiply_pid
+		
+		# This request should pull the file from the docroot, since it the
+		# docroot was not deleted from the config that was just read.
+		response = get_url('127.0.0.1',29998,'/xyzzy')
+
+		assert_equal("alfalfa leafcutter bee\n",response.body)
+	end
+	
 end

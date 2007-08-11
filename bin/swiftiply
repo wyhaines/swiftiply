@@ -19,6 +19,7 @@ module Swiftcore
 	class SwiftiplyExec
 		Ccluster_address = 'cluster_address'.freeze
 		Ccluster_port = 'cluster_port'.freeze
+		Cconfig_file = 'config_file'.freeze
 		Cbackend_address = 'backend_address'.freeze
 		Cbackend_port = 'backend_port'.freeze
 		Cmap = 'map'.freeze
@@ -52,13 +53,15 @@ module Swiftcore
 #			outgoing:
 # 
 #####
-		def self.parse_options(config = {})
+		def self.parse_options
+			config = @cliconfig || {}
+			@print = false
+			
 			OptionParser.new do |opts|
 				opts.banner = 'Usage: swiftiply.rb [options]'
 				opts.separator ''
 				opts.on('-c','--config CONFFILE',"The configuration file to read.") do |conf|
-					config = YAML.load(File.open(conf))
-					postprocess_config_load(config)
+					config[Cconfig_file] = conf
 				end
 				opts.on('--cluster-address [ADDRESS]',String,'The hostname/IP address that swiftiply will listen for connections on.') do |address|
 					config[Ccluster_address] = address
@@ -79,14 +82,24 @@ module Swiftcore
 					config[Ctimeout] = timeout
 				end
 				opts.on('-p','--print-config','Print the full configuration.') do
-					verify_config(config)
-					require 'pp'
-					pp config
-					exit
+					@print = true
 				end
 
 			end.parse!
+			@cliconfig ||= config
+			
+			fileconfig = {}
+			fileconfig = YAML.load(File.open(config['config_file'])) if config['config_file']
+			config = fileconfig.merge(@cliconfig)
+			postprocess_config_load(config)
 			puts("Configuration failed validation; exiting.") && exit unless verify_config(config)
+
+			if @print
+				require 'pp'
+				pp config
+				exit
+			end
+			
 			config
 		end
 
@@ -128,7 +141,7 @@ module Swiftcore
 
 		def self.on_windows?
 			return @on_windows unless @on_windows.nil?
-      @on_windows = !![/mswin/i, /cygwin/i, /mingw/i, /bccwin/i, /wince/i].find {|p| RUBY_PLATFORM =~ p}
+			@on_windows = !![/mswin/i, /cygwin/i, /mingw/i, /bccwin/i, /wince/i].find {|p| RUBY_PLATFORM =~ p}
 		end
 	end
 end

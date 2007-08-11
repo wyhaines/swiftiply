@@ -614,11 +614,14 @@ module Swiftcore
 
 		def self.run(config)
 			@existing_backends = {}
+			
 			# Default is to assume we want to try to turn epoll support on.  EM
 			# ignores this on platforms that don't support it, so this is safe.
 			EventMachine.epoll unless config.has_key?(Cepoll) and !config[Cepoll]
 			EventMachine.set_descriptor_table_size(4096 || config[Cepoll_descriptors]) if config[Cepoll]
 			EventMachine.run do
+				trap("HUP") {em_config(Swiftcore::SwiftiplyExec.parse_options); GC.start}
+				trap("INT") {EventMachine.stop_event_loop}
 				em_config(config)
 				GC.start
 			end
@@ -652,6 +655,7 @@ module Swiftcore
 			end
 		    	
 			new_config[Coutgoing] = {}
+
 			config[Cmap].each do |m|
 				if m[Ckeepalive]
 					# keepalive requests are standard Swiftiply requests.
@@ -721,8 +725,8 @@ module Swiftcore
 						
 						# Now stop everything that is still running but which isn't needed.
 						if RunningConfig.has_key?(Coutgoing)
-							(RunningConfig[Coutgoing].keys - new_config[Coutgoing]).each do |unneeded_server|
-								unneeded_server.stop_server
+							(RunningConfig[Coutgoing].keys - new_config[Coutgoing].keys).each do |unneeded_server_key|
+								RunningConfig[Coutgoing][unneeded_server_key].stop_server
 							end
 						end
 					end
