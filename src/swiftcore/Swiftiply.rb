@@ -232,7 +232,7 @@ module Swiftcore
 				
 				def find_static_file(docroot,path_info,client_name)
 					path = File.join(docroot,path_info)
-					path if FileTest.exist?(path) and FileTest.file?(path)
+					path if FileTest.exist?(path) and FileTest.file?(path) and File.expand_path(path).index(docroot) == 0
 				end
 				
 				# Pushes a front end client (web browser) into the queue of clients
