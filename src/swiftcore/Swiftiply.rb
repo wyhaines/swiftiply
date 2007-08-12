@@ -3,7 +3,7 @@ begin
 	require 'digest/sha2'
 	require 'eventmachine'
 	require 'fastfilereaderext'
-	require 'mime/types'
+	require 'swiftcore/types'
 rescue LoadError => e
 	unless load_attempted
 		load_attempted = true
@@ -74,6 +74,7 @@ module Swiftcore
 			@keys = {}
 			@demanding_clients = Hash.new {|h,k| h[k] = []}
 			@hitcounters = Hash.new {|h,k| h[k] = 0}
+			@typer = MIME::Types.instance_variable_get('@__types__')
 
 			class << self
 
@@ -189,7 +190,8 @@ module Swiftcore
 					client_name = clnt.name
 					dr = @docroot_map[client_name]
 					if path = find_static_file(dr,path_info,client_name)
-						ct = ::MIME::Types.type_for(path).first || Caos
+						#ct = ::MIME::Types.type_for(path).first || Caos
+						ct = @typer.simple_type_for(path) || Caos
 						fsize = File.size?(path)
 						if fsize > @chunked_encoding_threshold
 							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nTransfer-encoding: chunked\r\n\r\n"
@@ -203,7 +205,8 @@ module Swiftcore
 					else
 						false
 					end
-				rescue Object
+				rescue Object => e
+					puts e,e.backtrace.join("\n")
 					clnt.close_connection_after_writing
 					false
 				end
