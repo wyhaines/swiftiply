@@ -7,6 +7,9 @@ begin
 rescue LoadError => e
 	unless load_attempted
 		load_attempted = true
+		# Ugh.  Everything gets slower once rubygems are used.  So, for the
+		# best speed possible, don't install EventMachine or Swiftiply via
+		# gems.
 		require 'rubygems'
 		retry
 	end
@@ -17,6 +20,9 @@ module Swiftcore
 	module Swiftiply
 		Version = '0.6.0'
 
+		# Yeah, these constants look kind of tacky.  Inside of tight loops,
+		# though, using them makes a small but measurable difference, and those
+		# small differences add up....
 		C_empty = ''.freeze
 		C_slash = '/'.freeze
 		C_slashindex_html = '/index.html'.freeze
@@ -74,6 +80,7 @@ module Swiftcore
 			@keys = {}
 			@demanding_clients = Hash.new {|h,k| h[k] = []}
 			@hitcounters = Hash.new {|h,k| h[k] = 0}
+			# Kids, don't do this at home.  It's gross.
 			@typer = MIME::Types.instance_variable_get('@__types__')
 
 			class << self
@@ -184,6 +191,10 @@ module Swiftcore
 				# Todo for 0.7.0 -- add etag/if-modified/if-modified-since
 				# support.
 				#
+				# TODO: Add support for logging static file delivery if wanted.
+				#   The ideal logging would probably be to Analogger since it'd
+				#   limit the performance impact of the the logging.
+				#
 				
 				def serve_static_file(clnt)
 					path_info = clnt.uri
@@ -205,8 +216,10 @@ module Swiftcore
 					else
 						false
 					end
-				rescue Object => e
-					puts e,e.backtrace.join("\n")
+					# The exception is going to be eaten here, because some
+					# dumb file IO error shouldn't take Swiftiply down.
+					# TODO: It should log these errors, though.
+				rescue Object
 					clnt.close_connection_after_writing
 					false
 				end
@@ -238,7 +251,8 @@ module Swiftcore
 								# in this code.  Look at switching to something
 								# with a faster profile for push/pull from both
 								# ends as well as deletes.  There has to be
-								# something.
+								# something.  A linked list solves the push/pull
+								# which might be good enough.
 								@demanding_clients[$1].unshift clnt
 							else
 								@client_q[@incoming_map[clnt.name]].unshift(clnt)
@@ -286,20 +300,6 @@ module Swiftcore
 				def remove_client clnt
 					@client_q[clnt.name].delete clnt
 				end
-
-				# Walks through the client and server queues, matching
-				# waiting clients with waiting servers until the queue
-				# runs out of one or the other.  DEPRECATED
-
-				#def match_clients_to_servers
-				#	while @server_q.first && @client_q.first
-				#		server = @server_q.pop
-				#		client = @client_q.pop
-				#		server.associate = client
-				#		client.associate = server
-				#		client.push
-				#	end
-				#end
 
 				# Tries to match the client (passed as an argument) to a
 				# server.
@@ -455,6 +455,8 @@ module Swiftcore
 						end
 						@data_pos = @data.length
 
+						# If the request size crosses the size limit, then
+						# disallow redeployent of this request.
 						if @data_len > @redeployable
 							@redeployable = false
 							@data.clear
@@ -575,7 +577,8 @@ module Swiftcore
 						ProxyBag.add_server self
 					end
 				end
-			rescue => e
+			# TODO: Log these errors!
+			rescue
 				@associate.close_connection_after_writing if @associate
 				@associate = nil
 				setup

@@ -3,23 +3,6 @@ require 'eventmachine'
 require 'socket'
 
 # This is a basic Swiftiply client implementation.
-#
-# An example of a simple echo server:
-#
-#   require 'swiftcore/swiftiply_client'
-#
-#   class HttpEcho < SwiftiplyClientProtocol
-#     def receive_data data
-#       send_http_data data
-#     end
-#   end
-#
-#   EventMachine.run do
-#     EventMachine.epoll  # Linux 2.6.x kernels only
-#     HttpEcho.connect('127.0.0.1',8080)
-#   end
-#
-
 
 class SwiftiplyClientProtocol < EventMachine::Connection
 	

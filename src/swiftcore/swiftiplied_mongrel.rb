@@ -87,6 +87,13 @@ module Mongrel
 	end
 
 	class HttpServer
+		# There is no framework agnostic way to get that key value from the
+		# configuration into here; it'll require code specific to the way the
+		# different frameworks handle their configuration of Mongrel.  So....
+		# The support is here, for swiftiplied_mongrels which are secured by
+		# a key.  If someone want to donate any patches.  Otherwise, this won't
+		# really be useful to most people until 0.7.0.
+		
 		def initialize(host, port, num_processors=(2**30-1), timeout=0,key = '')
 			@socket = nil
 			@classifier = URIClassifier.new
