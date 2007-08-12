@@ -594,7 +594,8 @@ module MIME
     #     => "#{MIME::Types.type_for('citydesk.gif')}"
     def type_for(filename, platform = false)
       #ext = filename.chomp.downcase.gsub(/.*\./o, '')
-			ext = filename[filename.rindex(Cdot)+1..-1]
+			pos = filename.rindex(Cdot)
+			ext = pos ? filename[pos+1..-1] : nil
       list = @extension_index[ext]
       list.delete_if { |e| not e.platform? } if platform
       list
