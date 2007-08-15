@@ -11,7 +11,7 @@ spec = Gem::Specification.new do |s|
   s.name              = 'swiftiply'
   s.author            = %q(Kirk Haines)
   s.email             = %q(wyhaines@gmail.com)
-  s.version           = '0.6.0'
+  s.version           = '0.6.1'
   s.summary           = %q(A fast clustering proxy for web applications.)
   s.platform          = Gem::Platform::RUBY
 
@@ -19,7 +19,7 @@ spec = Gem::Specification.new do |s|
   s.rdoc_options      = %w(--title Swiftcore::Swiftiply --main README --line-numbers)
   s.extra_rdoc_files  = %w(README)
   s.extensions        << 'ext/fastfilereader/extconf.rb'
-  s.files = Dir['**/*']
+  s.files             = Dir['**/*']
 	s.executables = %w(swiftiply mongrel_rails swiftiply_mongrel_rails)
 	s.require_paths = %w(src)
 
