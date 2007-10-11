@@ -9,22 +9,19 @@ using namespace std;
 static VALUE SwiftcoreModule;
 static VALUE SplayTreeMapClass;
 
-//struct classcomp {
-//	  bool operator() (const char *s1, const char *s2) const
-//{
-//	if ( strcmp(s1,s2) < 0) {
-//		return true;
-//	} else {
-//		return false;
-//	}
-//}
-//
-//};
-//
-//typedef swiftcore::splay_map<char *,VALUE,classcomp> rb_splaymap;
-//typedef swiftcore::splay_map<char *,VALUE,classcomp>::iterator rb_splaymap_iterator;
-typedef swiftcore::splay_map<string, VALUE> rb_splaymap;
-typedef swiftcore::splay_map<string, VALUE>::iterator rb_splaymap_iterator;
+struct classcomp {
+  bool operator() (const char *s1, const char *s2) const
+	{
+		if ( strcmp(s1,s2) < 0) {
+			return true;
+		} else {
+			return false;
+		}
+	}
+};
+
+typedef swiftcore::splay_map<char *,VALUE,classcomp> rb_splaymap;
+typedef swiftcore::splay_map<char *,VALUE,classcomp>::iterator rb_splaymap_iterator;
 
 static void sptm_mark (rb_splaymap* st)
 {
@@ -62,7 +59,7 @@ static VALUE sptm_parent (VALUE self)
 		rb_splaymap_iterator parent = (*st).parent();
 		VALUE r = rb_ary_new();
 
-		rb_ary_push(r,rb_str_new(parent->first.c_str(),parent->first.size()));
+		rb_ary_push(r,rb_str_new2(parent->first));
 		rb_ary_push(r,parent->second);
 		return r;
 	}
@@ -81,7 +78,7 @@ static VALUE sptm_pop_front (VALUE self)
 		rb_splaymap_iterator front = (*st).begin();
 		VALUE r = rb_ary_new();
 		
-		rb_ary_push(r,rb_str_new(front->first.c_str(),front->first.size()));
+		rb_ary_push(r,rb_str_new2(front->first));
 		rb_ary_push(r,front->second);
 		(*st).erase(front);
 		return r;
@@ -101,7 +98,7 @@ static VALUE sptm_pop_back (VALUE self)
 		rb_splaymap_iterator back = (*st).end();
 		back--;
 		VALUE r = rb_ary_new();
-		rb_ary_push(r,rb_str_new(back->first.c_str(),back->first.size()));
+		rb_ary_push(r,rb_str_new2(back->first));
 		rb_ary_push(r,back->second);
 		(*st).erase(back);
 		return r;
@@ -166,7 +163,7 @@ static VALUE sptm_to_s (VALUE self)
 		rb_raise (rb_eException, "No SplayTreeMap Object");
 
 	for ( q_iterator = (*st).begin(); q_iterator != (*st).end(); q_iterator++ ) {
-		rb_str_concat(s,rb_str_new(q_iterator->first.c_str(),q_iterator->first.size()));
+		rb_str_concat(s,rb_str_new2(q_iterator->first));
 		rb_str_concat(s,rb_convert_type(q_iterator->second, T_STRING, "String", "to_str"));
 	} 
 
@@ -184,7 +181,7 @@ static VALUE sptm_to_a (VALUE self)
 		rb_raise (rb_eException, "No SplayTreeMap Object");
 
 	for ( q_iterator = (*st).begin(); q_iterator != (*st).end(); q_iterator++ ) {
-		rb_ary_push(ary,rb_str_new(q_iterator->first.c_str(),q_iterator->first.size()));
+		rb_ary_push(ary,rb_str_new2(q_iterator->first));
 		rb_ary_push(ary,q_iterator->second);
 	}
 
@@ -209,7 +206,7 @@ static VALUE sptm_inspect (VALUE self)
 	before_last_q_iterator--;
 
 	for ( q_iterator = (*st).begin(); q_iterator != last_q_iterator; q_iterator++ ) {
-		rb_str_concat(s,rb_inspect(rb_str_new(q_iterator->first.c_str(),q_iterator->first.size())));
+		rb_str_concat(s,rb_inspect(rb_str_new2(q_iterator->first)));
 		rb_str_concat(s,arrow);
 		rb_str_concat(s,rb_inspect(q_iterator->second));
 		if (q_iterator != before_last_q_iterator)
@@ -232,7 +229,7 @@ static VALUE sptm_first (VALUE self)
 	} else {
 		rb_splaymap_iterator front = (*st).begin();
 		VALUE r = rb_ary_new();
-		rb_ary_push(r,rb_str_new(front->first.c_str(),front->first.size()));
+		rb_ary_push(r,rb_str_new2(front->first));
 		rb_ary_push(r,front->second);
 		return r;
 	}
@@ -251,18 +248,18 @@ static VALUE sptm_last (VALUE self)
 		rb_splaymap_iterator back = (*st).end();
 		back--;
 		VALUE r = rb_ary_new();
-		rb_ary_push(r,rb_str_new(back->first.c_str(),back->first.size()));
+		rb_ary_push(r,rb_str_new2(back->first));
 		rb_ary_push(r,back->second);
 		return r;
 	}
 }
 
-/*
 static VALUE sptm_replace (VALUE self, VALUE new_st)
 {
 	rb_splaymap* st = NULL;
 	rb_splaymap* nst = NULL;
 	rb_splaymap_iterator q_iterator;
+	rb_splaymap_iterator last_q_iterator;
 	Data_Get_Struct(self, rb_splaymap, st);
 	Data_Get_Struct(new_st, rb_splaymap, nst);
 	if (!st)
@@ -272,30 +269,36 @@ static VALUE sptm_replace (VALUE self, VALUE new_st)
 		rb_raise (rb_eException, "No SplayTreeMap object to copy");
 
 	(*st).clear();
-	for ( q_iterator = (*nst).begin(); q_iterator != (*nst).end(); q_iterator++ ) {
-		(*st).push_back(*q_iterator);
+	last_q_iterator = (*st).end();
+	for ( q_iterator = (*nst).begin(); q_iterator != last_q_iterator; q_iterator++ ) {
+		(*st).insert(*q_iterator);
 	}
 
 	return self;
 }
-*/
-
 
 static VALUE sptm_insert (VALUE self, VALUE key, VALUE val)
 {
 	rb_splaymap* st = NULL;
 	std::pair<rb_splaymap_iterator, bool> rv;
-	string skey (StringValuePtr(key));
+	std::pair<char *,VALUE> sp;
+	char * skey;
+	char * svp;
+
+	svp = StringValuePtr(key);
+	skey = new char[strlen(svp)+1];
+	strcpy(skey,svp);
 
 	Data_Get_Struct(self, rb_splaymap, st);
 
 	if (!st)
 		rb_raise (rb_eException, "No SplayTreeMap Object");
 
-	rv = (*st).insert(make_pair(skey,val));
+	sp = make_pair(skey,val);
+	rv = (*st).insert(sp);
 	if (!rv.second) {
-		(*st).erase(skey);
-		(*st).insert(make_pair(skey,val));
+		(*st).erase(rv.first);
+		(*st).insert(sp);
 	}
 
 	return self;
@@ -305,9 +308,8 @@ static VALUE sptm_at (VALUE self, VALUE key)
 {
 	rb_splaymap* st = NULL;
 	rb_splaymap_iterator q_iterator;
-	rb_splaymap_iterator qi;
 
-	string skey (StringValuePtr(key));
+	char * skey = StringValuePtr(key);
 
 	Data_Get_Struct(self, rb_splaymap, st);
 
@@ -315,7 +317,6 @@ static VALUE sptm_at (VALUE self, VALUE key)
 		rb_raise (rb_eException, "No SplayTreeMap Object");
 
 	q_iterator = (*st).find(skey);
-	qi = (*st).begin();
 	if (q_iterator == (*st).end()) {
 		return Qnil;
 	} else {
@@ -324,7 +325,30 @@ static VALUE sptm_at (VALUE self, VALUE key)
 }
 
 
-static VALUE sptm_delete (VALUE self, VALUE obj)
+static VALUE sptm_delete (VALUE self, VALUE key)
+{
+	rb_splaymap* st = NULL;
+	rb_splaymap_iterator q_iterator;
+
+	char * skey = StringValuePtr(key);
+
+	Data_Get_Struct(self, rb_splaymap, st);
+
+	if (!st)
+		rb_raise (rb_eException, "No SplayTreeMap Object");
+
+	q_iterator = (*st).find(skey);
+	if (q_iterator == (*st).end()) {
+		return Qnil;
+	} else {
+		(*st).erase(q_iterator);
+	}
+
+	return self;
+}
+
+/*
+static VALUE sptm_delete_value (VALUE self, VALUE obj)
 {
 	rb_splaymap* st = NULL;
 	rb_splaymap_iterator q_iterator;
@@ -345,16 +369,8 @@ static VALUE sptm_delete (VALUE self, VALUE obj)
 
 	return self;
 }
-
-/*
-static VALUE sptm_assign_at (VALUE self, VALUE pos, VALUE val)
-{
-	sptm_delete(self,pos);
-	sptm_insert(self,pos,val);
-
-	return self;
-}
-
+*/
+ 
 static VALUE sptm_each (VALUE self)
 {
 	rb_splaymap* st = NULL;
@@ -368,7 +384,7 @@ static VALUE sptm_each (VALUE self)
 
 	last_q_iterator = (*st).end();
 	for ( q_iterator = (*st).begin(); q_iterator != last_q_iterator; q_iterator++ ) {
-		rb_yield(*q_iterator);
+		rb_yield_values(2,rb_str_new2(q_iterator->first),q_iterator->second);
 	}
 	
 	return self;
@@ -381,22 +397,97 @@ static VALUE sptm_index (VALUE self, VALUE match_obj)
 	rb_splaymap_iterator last_q_iterator;
 
 	Data_Get_Struct(self, rb_splaymap, st);
+
 	if (!st)
 		rb_raise (rb_eException, "No SplayTreeMap Object");
 
 	last_q_iterator = (*st).end();
-	int pos = 0;
 	for ( q_iterator = (*st).begin(); q_iterator != last_q_iterator; q_iterator++ ) {
-		if (rb_equal(*q_iterator,match_obj) == Qtrue) {
-			return INT2NUM(pos);
-		} else {
-			pos++;
+		if (rb_equal(q_iterator->second, match_obj)) {
+			return rb_str_new2(q_iterator->first);
 		}
 	}
 	return Qnil;
 }
 
-*/
+static VALUE sptm_keys (VALUE self)
+{
+	rb_splaymap* st = NULL;
+	rb_splaymap_iterator q_iterator;
+	rb_splaymap_iterator last_q_iterator;
+
+	Data_Get_Struct(self, rb_splaymap, st);
+
+	if (!st)
+		rb_raise (rb_eException, "No SplayTreeMap Object");
+
+	last_q_iterator = (*st).end();
+	VALUE r = rb_ary_new();
+	for ( q_iterator = (*st).begin(); q_iterator != last_q_iterator; q_iterator++ ) {
+		rb_ary_push(r,rb_str_new2(q_iterator->first));
+	}
+
+	return r;
+}
+
+static VALUE sptm_values (VALUE self)
+{
+	rb_splaymap* st = NULL;
+	rb_splaymap_iterator q_iterator;
+	rb_splaymap_iterator last_q_iterator;
+
+	Data_Get_Struct(self, rb_splaymap, st);
+
+	if (!st)
+		rb_raise (rb_eException, "No SplayTreeMap Object");
+
+	last_q_iterator = (*st).end();
+	VALUE r = rb_ary_new();
+	for ( q_iterator = (*st).begin(); q_iterator != last_q_iterator; q_iterator++ ) {
+		rb_ary_push(r,q_iterator->second);
+	}
+
+	return r;
+}
+
+static VALUE sptm_erase_childfree(VALUE self)
+{
+	rb_splaymap* st = NULL;
+
+	Data_Get_Struct(self, rb_splaymap, st);
+
+	if (!st)
+		rb_raise (rb_eException, "No SplayTreeMap Object");
+
+	(*st).erase_childfree_nodes();
+
+	return Qnil;
+}
+
+static VALUE sptm_get_max_permitted_size(VALUE self) {
+	rb_splaymap* st = NULL;
+
+	Data_Get_Struct(self, rb_splaymap, st);
+
+	if (!st)
+		rb_raise (rb_eException, "No SplayTreeMap Object");
+
+	return INT2FIX((*st).get_max_permitted_size());
+}
+
+static VALUE sptm_set_max_permitted_size(VALUE self, VALUE sz) {
+	int n = FIX2INT(sz);
+  rb_splaymap* st = NULL;
+
+	Data_Get_Struct(self, rb_splaymap, st);
+
+	if (!st)
+		rb_raise (rb_eException, "No SplayTreeMap Object");
+
+	(*st).set_max_permitted_size(n);
+
+	return sz;
+}
 
 /**********************
 Init_sptm
@@ -420,15 +511,21 @@ extern "C" void Init_splaytreemap()
 	rb_define_method (SplayTreeMapClass, "first", (VALUE(*)(...))sptm_first,0);
 	rb_define_method (SplayTreeMapClass, "last", (VALUE(*)(...))sptm_last,0);
 	rb_define_method (SplayTreeMapClass, "parent", (VALUE(*)(...))sptm_parent,0);
-	//rb_define_method (SplayTreeMapClass, "replace", (VALUE(*)(...))sptm_replace,1);
+	rb_define_method (SplayTreeMapClass, "replace", (VALUE(*)(...))sptm_replace,1);
 	rb_define_method (SplayTreeMapClass, "inspect", (VALUE(*)(...))sptm_inspect,0);
 	rb_define_method (SplayTreeMapClass, "at", (VALUE(*)(...))sptm_at,1);
 	rb_define_method (SplayTreeMapClass, "[]", (VALUE(*)(...))sptm_at,1);
 	rb_define_method (SplayTreeMapClass, "delete", (VALUE(*)(...))sptm_delete,1);
 	rb_define_method (SplayTreeMapClass, "insert", (VALUE(*)(...))sptm_insert,2);
 	rb_define_method (SplayTreeMapClass, "[]=", (VALUE(*)(...))sptm_insert,2);
-	//rb_define_method (SplayTreeMapClass, "each", (VALUE(*)(...))sptm_each,0);
-	//rb_define_method (SplayTreeMapClass, "index", (VALUE(*)(...))sptm_index,1);
+	rb_define_method (SplayTreeMapClass, "each", (VALUE(*)(...))sptm_each,0);
+	rb_define_method (SplayTreeMapClass, "index", (VALUE(*)(...))sptm_index,1);
+	rb_define_method (SplayTreeMapClass, "keys", (VALUE(*)(...))sptm_keys,0);
+	rb_define_method (SplayTreeMapClass, "values", (VALUE(*)(...))sptm_values,0);
+	rb_define_method (SplayTreeMapClass, "clear_childfree", (VALUE(*)(...))sptm_erase_childfree,0);
+	rb_define_method (SplayTreeMapClass, "max_permitted_size", (VALUE(*)(...))sptm_get_max_permitted_size,0);
+	rb_define_method (SplayTreeMapClass, "max_permitted_size=", (VALUE(*)(...))sptm_set_max_permitted_size,1);
+
 
 /*    ==   []   []   []=   clear   default   default=   default_proc   delete   delete_if   each   each_key   each_pair   each_value   empty?   fetch   has_key?   has_value?   include?   index   indexes   indices   initialize_copy   inspect   invert   key?   keys   length   member?   merge   merge!   new   pretty_print   pretty_print_cycle   rehash   reject   reject!   replace   select   shift   size   sort   store   to_a   to_hash   to_s   to_yaml   update   value?   values   values_at  */
 //	rb_include_module (SplayTreeMapClass, rb_mEnumerable);

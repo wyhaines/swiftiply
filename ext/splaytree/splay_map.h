@@ -133,6 +133,9 @@ namespace swiftcore
 		const_iterator	end()	const	{ return rep_.end(); }
 		iterator		parent()			{ return rep_.parent(); }
 		const_iterator	parent()	const	{ return rep_.parent(); }
+		void erase_childfree_nodes() {rep_.erase_childfree_nodes();}
+		void set_max_permitted_size(int sz) {rep_.set_max_permitted_size(sz);};
+		int get_max_permitted_size() {return rep_.get_max_permitted_size();};
 
 		// reversible container	| complexity : constant		| exception : nothrow
 		reverse_iterator		rbegin()		{ return reverse_iterator( end() ); }

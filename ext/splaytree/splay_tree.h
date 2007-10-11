@@ -580,7 +580,7 @@ namespace swiftcore
 
 			// container	| complexity : constant		| exception :
 			explicit splay_tree( const key_compare& comp, const allocator_type& a )
-				: size_( 0 ), comp_( comp ), allocator_( a ), node_allocator_( a )
+				: size_( 0 ), maxsz_( 1024 ), comp_( comp ), allocator_( a ), node_allocator_( a )
 			{
 				data_ = node_allocator_.allocate( 1, 0 );
 
@@ -620,6 +620,14 @@ namespace swiftcore
 			// container	| complexity : constant		| exception : nothrow
 			size_type size() const		{ return size_; }
 
+			void set_max_permitted_size(int sz) {
+				maxsz_ = ((sz < 0) ? 0 : sz);
+			}
+
+			int get_max_permitted_size() {
+				return maxsz_;
+			}
+
 			// container	| complexity : constant		| exception : nothrow
 			size_type max_size() const	{ return allocator_.max_size(); }
 
@@ -656,6 +664,9 @@ namespace swiftcore
 					++size_;
 					inserted = true;
 				}
+
+				if (size_ > maxsz_)
+					erase_childfree_nodes();
 
 				return std::pair<iterator, bool>( iterator( data_->parent ), inserted );
 			}
@@ -721,6 +732,8 @@ namespace swiftcore
 					++size_;
 				}
 
+				if (size_ > maxsz_)
+					erase_childfree_nodes();
 				return iterator( data_->parent );
 			}
 
@@ -915,6 +928,23 @@ namespace swiftcore
 				return std::make_pair( lower_bound( x ), upper_bound( x ) );
 			}
 
+			// | complexity: linear
+			void erase_childfree_nodes() {
+				node_base* n;
+				iterator it = begin();
+				iterator oit;
+				iterator last = end();
+				for (; it != last;) {
+					n = it.item_;
+					if (n->left == 0 && n->right == 0) {
+						oit = it++;
+						erase(oit);
+					} else {
+						it++;
+					}
+				}
+			}
+
 		private:
 
 			// return a newly allocate node holding the value x | complexity : constant	| exception : strong
@@ -1085,6 +1115,7 @@ namespace swiftcore
 
 		private:
 			size_type size_;
+			int maxsz_;
 			key_compare comp_;
 			allocator_type allocator_;
 			typename allocator_type::template rebind<node>::other node_allocator_;
