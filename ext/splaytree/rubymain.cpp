@@ -117,7 +117,7 @@ static VALUE sptm_size (VALUE self)
 }
 
 
-static VALUE sptm_max_size (VALUE self)
+static VALUE sptm_max_capacity (VALUE self)
 {
 	rb_splaymap* st = NULL;
 	Data_Get_Struct(self, rb_splaymap, st);
@@ -464,7 +464,7 @@ static VALUE sptm_erase_childfree(VALUE self)
 	return Qnil;
 }
 
-static VALUE sptm_get_max_permitted_size(VALUE self) {
+static VALUE sptm_get_max_size(VALUE self) {
 	rb_splaymap* st = NULL;
 
 	Data_Get_Struct(self, rb_splaymap, st);
@@ -475,16 +475,23 @@ static VALUE sptm_get_max_permitted_size(VALUE self) {
 	return INT2FIX((*st).get_max_permitted_size());
 }
 
-static VALUE sptm_set_max_permitted_size(VALUE self, VALUE sz) {
+static VALUE sptm_set_max_size(VALUE self, VALUE sz) {
 	int n = FIX2INT(sz);
   rb_splaymap* st = NULL;
 
 	Data_Get_Struct(self, rb_splaymap, st);
 
+	if (n < 0)
+		rb_raise (rb_eException, "Size can not be less than zero.");
+
 	if (!st)
 		rb_raise (rb_eException, "No SplayTreeMap Object");
 
 	(*st).set_max_permitted_size(n);
+
+	while ((*st).size() > n) {
+		(*st).erase_childfree_nodes();
+	}
 
 	return sz;
 }
@@ -499,33 +506,48 @@ extern "C" void Init_splaytreemap()
 	SplayTreeMapClass = rb_define_class_under (SwiftcoreModule, "SplayTreeMap", rb_cObject);
 
 	rb_define_module_function (SplayTreeMapClass, "new", (VALUE(*)(...))sptm_new, 0);
-	rb_define_method (SplayTreeMapClass, "shift", (VALUE(*)(...))sptm_pop_front,0);
-	rb_define_method (SplayTreeMapClass, "pop", (VALUE(*)(...))sptm_pop_back,0);
-	rb_define_method (SplayTreeMapClass, "size", (VALUE(*)(...))sptm_size,0);
-	rb_define_method (SplayTreeMapClass, "length", (VALUE(*)(...))sptm_size,0);
-	rb_define_method (SplayTreeMapClass, "max_size", (VALUE(*)(...))sptm_max_size,0);
-	rb_define_method (SplayTreeMapClass, "clear", (VALUE(*)(...))sptm_clear,0);
-	rb_define_method (SplayTreeMapClass, "empty?", (VALUE(*)(...))sptm_empty,0);
-	rb_define_method (SplayTreeMapClass, "to_s", (VALUE(*)(...))sptm_to_s,0);
-	rb_define_method (SplayTreeMapClass, "to_a", (VALUE(*)(...))sptm_to_a,0);
-	rb_define_method (SplayTreeMapClass, "first", (VALUE(*)(...))sptm_first,0);
-	rb_define_method (SplayTreeMapClass, "last", (VALUE(*)(...))sptm_last,0);
-	rb_define_method (SplayTreeMapClass, "parent", (VALUE(*)(...))sptm_parent,0);
-	rb_define_method (SplayTreeMapClass, "replace", (VALUE(*)(...))sptm_replace,1);
-	rb_define_method (SplayTreeMapClass, "inspect", (VALUE(*)(...))sptm_inspect,0);
-	rb_define_method (SplayTreeMapClass, "at", (VALUE(*)(...))sptm_at,1);
+	// ==
 	rb_define_method (SplayTreeMapClass, "[]", (VALUE(*)(...))sptm_at,1);
-	rb_define_method (SplayTreeMapClass, "delete", (VALUE(*)(...))sptm_delete,1);
-	rb_define_method (SplayTreeMapClass, "insert", (VALUE(*)(...))sptm_insert,2);
 	rb_define_method (SplayTreeMapClass, "[]=", (VALUE(*)(...))sptm_insert,2);
-	rb_define_method (SplayTreeMapClass, "each", (VALUE(*)(...))sptm_each,0);
-	rb_define_method (SplayTreeMapClass, "index", (VALUE(*)(...))sptm_index,1);
-	rb_define_method (SplayTreeMapClass, "keys", (VALUE(*)(...))sptm_keys,0);
-	rb_define_method (SplayTreeMapClass, "values", (VALUE(*)(...))sptm_values,0);
+	rb_define_method (SplayTreeMapClass, "at", (VALUE(*)(...))sptm_at,1);
+	rb_define_method (SplayTreeMapClass, "clear", (VALUE(*)(...))sptm_clear,0);
 	rb_define_method (SplayTreeMapClass, "clear_childfree", (VALUE(*)(...))sptm_erase_childfree,0);
-	rb_define_method (SplayTreeMapClass, "max_permitted_size", (VALUE(*)(...))sptm_get_max_permitted_size,0);
-	rb_define_method (SplayTreeMapClass, "max_permitted_size=", (VALUE(*)(...))sptm_set_max_permitted_size,1);
+	rb_define_method (SplayTreeMapClass, "delete", (VALUE(*)(...))sptm_delete,1);
+	// delete_if
+	// delete_values
+	rb_define_method (SplayTreeMapClass, "each", (VALUE(*)(...))sptm_each,0);
+	// each_key
+	rb_define_method (SplayTreeMapClass, "each_pair", (VALUE(*)(...))sptm_each,0);
+	// each_value
+	rb_define_method (SplayTreeMapClass, "empty?", (VALUE(*)(...))sptm_empty,0);
+	rb_define_method (SplayTreeMapClass, "fetch", (VALUE(*)(...))sptm_at,1);
+	rb_define_method (SplayTreeMapClass, "first", (VALUE(*)(...))sptm_first,0);
+	// has_key?
+	// has_value?
+	// include?
+	rb_define_method (SplayTreeMapClass, "index", (VALUE(*)(...))sptm_index,1);
+	// indices
+	rb_define_method (SplayTreeMapClass, "insert", (VALUE(*)(...))sptm_insert,2);
+	rb_define_method (SplayTreeMapClass, "inspect", (VALUE(*)(...))sptm_inspect,0);
+	// invert
+	// key?
+	rb_define_method (SplayTreeMapClass, "keys", (VALUE(*)(...))sptm_keys,0);
+	rb_define_method (SplayTreeMapClass, "last", (VALUE(*)(...))sptm_last,0);
+	rb_define_method (SplayTreeMapClass, "length", (VALUE(*)(...))sptm_size,0);
+	rb_define_method (SplayTreeMapClass, "max_capacity", (VALUE(*)(...))sptm_max_capacity,0);
+	rb_define_method (SplayTreeMapClass, "max_size", (VALUE(*)(...))sptm_get_max_size,0);
+	rb_define_method (SplayTreeMapClass, "max_size=", (VALUE(*)(...))sptm_set_max_size,1);
+	// member?
+	rb_define_method (SplayTreeMapClass, "parent", (VALUE(*)(...))sptm_parent,0);
+	rb_define_method (SplayTreeMapClass, "pop", (VALUE(*)(...))sptm_pop_back,0);
+	rb_define_method (SplayTreeMapClass, "replace", (VALUE(*)(...))sptm_replace,1);
+	rb_define_method (SplayTreeMapClass, "shift", (VALUE(*)(...))sptm_pop_front,0);
+	rb_define_method (SplayTreeMapClass, "size", (VALUE(*)(...))sptm_size,0);
+	rb_define_method (SplayTreeMapClass, "to_a", (VALUE(*)(...))sptm_to_a,0);
+	rb_define_method (SplayTreeMapClass, "to_s", (VALUE(*)(...))sptm_to_s,0);
+	rb_define_method (SplayTreeMapClass, "values", (VALUE(*)(...))sptm_values,0);
 
+	rb_include_module (SplayTreeMapClass, rb_mEnumerable);
 
 /*    ==   []   []   []=   clear   default   default=   default_proc   delete   delete_if   each   each_key   each_pair   each_value   empty?   fetch   has_key?   has_value?   include?   index   indexes   indices   initialize_copy   inspect   invert   key?   keys   length   member?   merge   merge!   new   pretty_print   pretty_print_cycle   rehash   reject   reject!   replace   select   shift   size   sort   store   to_a   to_hash   to_s   to_yaml   update   value?   values   values_at  */
 //	rb_include_module (SplayTreeMapClass, rb_mEnumerable);
