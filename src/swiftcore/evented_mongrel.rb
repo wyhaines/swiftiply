@@ -82,14 +82,19 @@ module Mongrel
 	end
 
 	class HttpServer
-		def initialize(host, port, num_processors=(2**30-1), timeout=0)
+		def initialize(host, port, num_processors=950, x=0, y=nil) # Deal with Mongrel 1.0.1 or earlier, as well as later.
 			@socket = nil
 			@classifier = URIClassifier.new
 			@host = host
 			@port = port
 			@workers = ThreadGroup.new
-			@timeout = timeout
-			@num_processors = num_processors
+			if y
+				@throttle = x
+				@timeout = y || 60
+			else
+				@timeout = x
+			end
+			@num_processors = num_processors #num_processors is pointless for evented....
 			@death_time = 60
 			self.class.const_set(:Instance,self)
 		end
@@ -98,6 +103,8 @@ module Mongrel
 			trap('INT') { raise StopServer }
 			trap('TERM') { raise StopServer }
 			@acceptor = Thread.new do
+				EventMachine.epoll
+				EventMachine.set_descriptor_table_size(4096)
 				EventMachine.run do
 					begin
 						EventMachine.start_server(@host,@port,MongrelProtocol)

@@ -94,14 +94,19 @@ module Mongrel
 		# a key.  If someone want to donate any patches.  Otherwise, this won't
 		# really be useful to most people until 0.7.0.
 		
-		def initialize(host, port, num_processors=(2**30-1), timeout=0,key = '')
+		def initialize(host, port, num_processors=950, x=0, y=nil,key='') # Deal with Mongrel 1.0.1 or earlier, as well as later.
 			@socket = nil
 			@classifier = URIClassifier.new
 			@host = host
 			@port = port
 			@key = key
 			@workers = ThreadGroup.new
-			@timeout = timeout
+			if y
+				@throttle = x
+				@timeout = y || 60
+			else
+				@timeout = x
+			end
 			@num_processors = num_processors
 			@death_time = 60
 			self.class.const_set(:Instance,self)
