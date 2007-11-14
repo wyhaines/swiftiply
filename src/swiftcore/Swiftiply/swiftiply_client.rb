@@ -1,6 +1,19 @@
 # -*- coding: ISO-8859-1 -*-
-require 'eventmachine'
-require 'socket'
+begin
+	load_attempted ||= false
+	require 'eventmachine'
+	require 'socket'
+rescue LoadError => e
+	unless load_attempted
+		load_attempted = true
+		# Ugh.  Everything gets slower once rubygems are used.  So, for the
+		# best speed possible, don't install EventMachine or Swiftiply via
+		# gems.
+		require 'rubygems'
+		retry
+	end
+	raise e
+end
 
 # This is a basic Swiftiply client implementation.
 
