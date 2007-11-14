@@ -4,6 +4,10 @@ begin
 	require 'eventmachine'
 	require 'fastfilereaderext'
 	require 'swiftcore/types'
+	require 'swiftcore/deque'
+	require 'swiftcore/splaytreemap'
+#	require 'swiftcore/microparser'
+#	require 'ruby-prof'
 rescue LoadError => e
 	unless load_attempted
 		load_attempted = true
@@ -16,9 +20,13 @@ rescue LoadError => e
 	raise e
 end
 
+
 module Swiftcore
+
+	#Deque = Array
+
 	module Swiftiply
-		Version = '0.6.1'
+		Version = '0.6.3'
 
 		# Yeah, these constants look kind of tacky.  Inside of tight loops,
 		# though, using them makes a small but measurable difference, and those
@@ -37,21 +45,26 @@ module Swiftcore
 		Cchunked_encoding_threshold = 'chunked_encoding_threshold'.freeze
 		Cdaemonize = 'daemonize'.freeze
 		Cdefault = 'default'.freeze
+		Cdescriptor_cache = 'descriptor_cache_threshold'.freeze
 		Cdocroot = 'docroot'.freeze
 		Cepoll = 'epoll'.freeze
 		Cepoll_descriptors = 'epoll_descriptors'.freeze
+		Cfile_cache = 'file_cache_threshold'.freeze
 		Cgroup = 'group'.freeze
 		Chost = 'host'.freeze
 		Cincoming = 'incoming'.freeze
 		Ckeepalive = 'keepalive'.freeze
 		Ckey = 'key'.freeze
 		Cmap = 'map'.freeze
+		Cmax_cache_size = 'max_cache_size'.freeze
 		Cmsg_expired = 'browser connection expired'.freeze
 		Coutgoing = 'outgoing'.freeze
 		Cport = 'port'.freeze
 		Credeployable = 'redeployable'.freeze
 		Credeployment_sizelimit = 'redeployment_sizelimit'.freeze
+		Csize = 'size'.freeze
 		Cswiftclient = 'swiftclient'.freeze
+		Cthreshold = 'threshold'.freeze
 		Ctimeout = 'timeout'.freeze
 		Curl = 'url'.freeze
 		Cuser = 'user'.freeze
@@ -67,8 +80,10 @@ module Swiftcore
 		# them, if necessary.
 
 		class ProxyBag
-			@client_q = Hash.new {|h,k| h[k] = []}
-			@server_q = Hash.new {|h,k| h[k] = []}
+			@client_q = Hash.new {|h,k| h[k] = Deque.new}
+			#@client_q = Hash.new {|h,k| h[k] = []}
+			@server_q = Hash.new {|h,k| h[k] = Deque.new}
+			#@server_q = Hash.new {|h,k| h[k] = []}
 			@ctime = Time.now
 			@server_unavailable_timeout = 6
 			@id_map = {}
@@ -77,11 +92,16 @@ module Swiftcore
 			@docroot_map = {}
 			@log_map = {}
 			@redeployable_map = {}
+			@file_cache_map = {}
+			@file_cache_threshold_map = {}
 			@keys = {}
-			@demanding_clients = Hash.new {|h,k| h[k] = []}
+			@demanding_clients = Hash.new {|h,k| h[k] = Deque.new}
+			#@demanding_clients = Hash.new {|h,k| h[k] = []}
 			@hitcounters = Hash.new {|h,k| h[k] = 0}
 			# Kids, don't do this at home.  It's gross.
 			@typer = MIME::Types.instance_variable_get('@__types__')
+
+			@dcnt = 0
 
 			class << self
 
@@ -143,6 +163,10 @@ module Swiftcore
 					@log_map[name] = log
 				end
 
+				def add_file_cache(cache,name)
+					@file_cache_map[name] = cache
+				end
+
 				# Sets the default proxy destination, if requests are received
 				# which do not match a defined destination.
 				
@@ -170,16 +194,17 @@ module Swiftcore
 				# The chunked_encoding_threshold is a file size limit.  Files
 				# which fall below this limit are sent in one chunk of data.
 				# Files which hit or exceed this limit are delivered via chunked
-				# encoding.
+				# encoding.  This enforces a maximum threshold of 32k.
 				
 				def chunked_encoding_threshold
 					@chunked_enconding_threshold
 				end
 				
 				def chunked_encoding_threshold=(val)
+					val = 32768 if val > 32768
 					@chunked_encoding_threshold = val
 				end
-				
+
 				# Handle static files.  It employs an extension to efficiently
 				# handle large files, and depends on an addition to
 				# EventMachine, send_file_data(), to efficiently handle small
@@ -200,16 +225,24 @@ module Swiftcore
 					path_info = clnt.uri
 					client_name = clnt.name
 					dr = @docroot_map[client_name]
-					if path = find_static_file(dr,path_info,client_name)
+					fc = @file_cache_map[client_name]
+					if data = fc[path_info]
+						clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{data.last}\r\nContent-Length: #{data[1]}\r\n\r\n"
+						clnt.send_data data.first
+						clnt.close_connection_after_writing
+						true
+					elsif path = find_static_file(dr,path_info,client_name)
 						#ct = ::MIME::Types.type_for(path).first || Caos
 						ct = @typer.simple_type_for(path) || Caos
-						fsize = File.size?(path)
+						fsize = File.size(path)
 						if fsize > @chunked_encoding_threshold
-							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nTransfer-encoding: chunked\r\n\r\n"
+							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n\r\n"
 							EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing}
 						else
-							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nContent-length: #{fsize}\r\n\r\n"
+							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
 							clnt.send_file_data path
+							fd = File.read(path)
+							fc[path_info] = [fd,fd.length,ct]
 							clnt.close_connection_after_writing
 						end
 						true
@@ -219,7 +252,10 @@ module Swiftcore
 					# The exception is going to be eaten here, because some
 					# dumb file IO error shouldn't take Swiftiply down.
 					# TODO: It should log these errors, though.
-				rescue Object
+				rescue Object => e
+					puts "path: #{dr.inspect} / #{path.inspect}"
+puts e
+puts e.backtrace.join("\n")
 					clnt.close_connection_after_writing
 					false
 				end
@@ -232,7 +268,7 @@ module Swiftcore
 				
 				def find_static_file(docroot,path_info,client_name)
 					path = File.join(docroot,path_info)
-					path if FileTest.exist?(path) and FileTest.file?(path) and File.expand_path(path).index(docroot) == 0
+					FileTest.exist?(path) and FileTest.file?(path) and File.expand_path(path).index(docroot) == 0 ? path : false
 				end
 				
 				# Pushes a front end client (web browser) into the queue of clients
@@ -246,13 +282,8 @@ module Swiftcore
 					unless @docroot_map.has_key?(clnt.name) and serve_static_file(clnt)
 						data_q.unshift data
 						unless match_client_to_server_now(clnt)
-							if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
-								# NOTE: I hate using unshift and delete on arrays
-								# in this code.  Look at switching to something
-								# with a faster profile for push/pull from both
-								# ends as well as deletes.  There has to be
-								# something.  A linked list solves the push/pull
-								# which might be good enough.
+							#if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
+							if $&
 								@demanding_clients[$1].unshift clnt
 							else
 								@client_q[@incoming_map[clnt.name]].unshift(clnt)
@@ -267,12 +298,8 @@ module Swiftcore
 					clnt.data_pos = clnt.data_len = 0
 					
 					unless match_client_to_server_now(clnt)
-						if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
-							# NOTE: I hate using unshift and delete on arrays
-							# in this code.  Look at switching to something
-							# with a faster profile for push/pull from both
-							# ends as well as deletes.  There has to be
-							# something.
+						#if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
+						if $&
 							@demanding_clients[$1].unshift clnt
 						else
 							@client_q[@incoming_map[clnt.name]].unshift(clnt)
@@ -306,7 +333,9 @@ module Swiftcore
 
 				def match_client_to_server_now(client)
 					sq = @server_q[@incoming_map[client.name]]
-					if client.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
+					if sq.empty?
+						false
+					elsif client.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
 						if sidx = sq.index(@reverse_id_map[$1])
 							server = sq.delete_at(sidx)
 							server.associate = client
@@ -377,6 +406,10 @@ module Swiftcore
 					@ctime = Time.now
 				end
 
+				def dcnt
+					@dcnt += 1
+				end
+
 			end
 		end
 
@@ -384,19 +417,22 @@ module Swiftcore
 		# to communicate between Swiftiply and the web browser clients.
 
 		class ClusterProtocol < EventMachine::Connection
+#			include Swiftcore::MicroParser
 
 			attr_accessor :create_time, :associate, :name, :redeployable, :data_pos, :data_len
 
 			Crn = "\r\n".freeze
 			Crnrn = "\r\n\r\n".freeze
 			C_blank = ''.freeze
+			C503Header = "HTTP/1.0 503 Server Unavailable\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
 
 			# Initialize the @data array, which is the temporary storage for blocks
 			# of data received from the web browser client, then invoke the superclass
 			# initialization.
 
 			def initialize *args
-				@data = []
+				@data = Deque.new
+				#@data = []
 				@data_pos = 0
 				@name = @uri = nil
 				super
@@ -407,19 +443,41 @@ module Swiftcore
 					@data.unshift data
 					push
 				else
-					if data =~ /^Host:\s*([^\r:]*)/
+					# Note the \0 below.  intern() blows up when passed a \0.  People who are trying to break a server like to pass \0s.  This should cope with that.
+					if data =~ /^Host:\s*([^\r\0:]*)/
 						# NOTE: Should I be using intern for this?  It might not
 						# be a good idea.
 						@name = $1.intern
 						
 						data =~ /\s([^\s\?]*)/
 						@uri = $1
+						@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete('%')].pack('H*')} if @uri =~ /%/
 						@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
 						ProxyBag.add_frontend_client(self,@data,data)
 					elsif data =~ /\r\n\r\n/
 						@name = ProxyBag.default_name
+						data =~ /\s([^\s\?]*)/
+						@uri = $1
+						@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete('%')].pack('H*')} if @uri =~ /%/
 						ProxyBag.add_frontend_client(self,@data,data)
 					end
+#					r = consume_data(data)
+#
+#					close_connection unless r
+#					if @_http_parsed
+#						if @http_host
+#							@name = @http_host.intern
+#							@uri = @http_request_uri
+#							@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
+#							ProxyBag.add_frontend_client(self,@data,data)
+#						else
+#							@name = ProxyBag.default_name
+#							@uri = @http_request_uri
+#							ProxyBag.add_frontend_client(self,@data,data)
+#						end
+#					else
+#						@data.unshift data
+#					end
 				end
 			end
 
@@ -427,13 +485,7 @@ module Swiftcore
 			# waiting for a backend to handle it.
 
 			def send_503_response
-				send_data [
-					"HTTP/1.0 503 Server Unavailable\r\n",
-					"Content-type: text/plain\r\n",
-					"Connection: close\r\n",
-					"\r\n",
-					"Server Unavailable"
-				].join
+				send_data "#{C503Header}Server Unavailable\n\nThe request (#{@uri} --> #{@name}), received on #{create_time.asctime} timed out before being deployed to a server for processing."
 				close_connection_after_writing
 			end
 	
@@ -623,14 +675,21 @@ module Swiftcore
 			
 			# Default is to assume we want to try to turn epoll support on.  EM
 			# ignores this on platforms that don't support it, so this is safe.
-			EventMachine.epoll unless config.has_key?(Cepoll) and !config[Cepoll]
-			EventMachine.set_descriptor_table_size(4096 || config[Cepoll_descriptors]) if config[Cepoll]
+			unless config.has_key?(Cepoll) and !config[Cepoll]
+				EventMachine.epoll
+				EventMachine.set_descriptor_table_size(4096 || config[Cepoll_descriptors])
+			end
 			EventMachine.run do
 				trap("HUP") {em_config(Swiftcore::SwiftiplyExec.parse_options); GC.start}
 				trap("INT") {EventMachine.stop_event_loop}
 				em_config(config)
 				GC.start
+				#RubyProf.start
 			end
+			#result = RubyProf.stop
+
+			#printer = RubyProf::TextPrinter.new(result)
+			#File.open('/tmp/swprof','w+') {|fh| printer = printer.print(fh,0)}
 		end
 		
 		def self.em_config(config)
@@ -653,7 +712,7 @@ module Swiftcore
 				end
 				new_config[Ccluster_address] = config[Ccluster_address]
 				new_config[Ccluster_port] = config[Ccluster_port]
-		    	RunningConfig[Ccluster_server].stop_server if RunningConfig.has_key?(Ccluster_server)
+		    	EventMachine.stop_server(RunningConfig[Ccluster_server]) if RunningConfig.has_key?(Ccluster_server)
 			else
 				new_config[Ccluster_server] = RunningConfig[Ccluster_server]
 				new_config[Ccluster_address] = RunningConfig[Ccluster_address]
@@ -670,12 +729,21 @@ module Swiftcore
 					# uniquely identify a section.
 					hash = Digest::SHA256.hexdigest(m[Cincoming].sort.join('|')).intern
 					
+					filecache = Swiftcore::SplayTreeMap.new
+					sz = 100
+					if m.has_key?(Cfile_cache)
+						sz = m[Cfile_cache][Csize] || 100
+						sz = 100 if sz < 0
+					end
+					filecache.max_size = sz
+
 					# For each incoming entry, do setup.
 					new_config[Cincoming] = {}
 					m[Cincoming].each do |p_|
 						p = p_.intern
 						new_config[Cincoming][p] = {}
 						ProxyBag.add_incoming_mapping(hash,p)
+						ProxyBag.add_file_cache(filecache,p)
 						
 						if m.has_key?(Cdocroot)
 							ProxyBag.add_incoming_docroot(m[Cdocroot],p)
@@ -732,7 +800,7 @@ module Swiftcore
 						# Now stop everything that is still running but which isn't needed.
 						if RunningConfig.has_key?(Coutgoing)
 							(RunningConfig[Coutgoing].keys - new_config[Coutgoing].keys).each do |unneeded_server_key|
-								RunningConfig[Coutgoing][unneeded_server_key].stop_server
+								EventMachine.stop_server(RunningConfig[Coutgoing][unneeded_server_key])
 							end
 						end
 					end
