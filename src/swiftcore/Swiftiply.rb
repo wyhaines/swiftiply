@@ -444,7 +444,7 @@ puts e.backtrace.join("\n")
 					push
 				else
 					# Note the \0 below.  intern() blows up when passed a \0.  People who are trying to break a server like to pass \0s.  This should cope with that.
-					if data =~ /^Host:\s*([^\r\0:]*)/
+					if data =~ /^Host:\s*([^\r\0:]+)/
 						# NOTE: Should I be using intern for this?  It might not
 						# be a good idea.
 						@name = $1.intern
