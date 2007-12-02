@@ -38,7 +38,12 @@ module Mongrel
 					if handlers
 						@params[::Mongrel::Const::PATH_INFO] = path_info
 						@params[::Mongrel::Const::SCRIPT_NAME] = script_name
-						@params[::Mongrel::Const::REMOTE_ADDR] = @params[::Mongrel::Const::HTTP_X_FORWARDED_FOR] || ::Socket.unpack_sockaddr_in(get_peername)[1]
+						# The previous behavior of this line set REMOTE_ADDR equal to HTTP_X_FORWARDED_FOR
+						# if it was defined.  This behavior seems inconsistent with the intention of
+						# http://www.ietf.org/rfc/rfc3875 so it has been changed.  REMOTE_ADDR now always
+						# contains the address of the immediate source of the connection.  Check
+						# @params[::Mongrel::Const::HTTP_X_FORWARDED_FOR] if you need that information.
+						@params[::Mongrel::Const::REMOTE_ADDR] = ::Socket.unpack_sockaddr_in(get_peername)[1] rescue nil
 						@notifiers = handlers.select { |h| h.request_notify }
 					end
 					if @request_len > ::Mongrel::Const::MAX_BODY
