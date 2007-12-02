@@ -6,6 +6,7 @@ begin
 	require 'swiftcore/types'
 	require 'swiftcore/deque'
 	require 'swiftcore/splaytreemap'
+	require 'swiftcore/streamer'
 #	require 'swiftcore/microparser'
 #	require 'ruby-prof'
 rescue LoadError => e
@@ -34,6 +35,8 @@ module Swiftcore
 		C_empty = ''.freeze
 		C_slash = '/'.freeze
 		C_slashindex_html = '/index.html'.freeze
+		C1_0 = '1.0'.freeze
+		C1_1 = '1.1'.freeze
 		Caos = 'application/octet-stream'.freeze
 		Ccache_directory = 'cache_directory'.freeze
 		Ccache_extensions = 'cache_extensions'.freeze
@@ -51,6 +54,7 @@ module Swiftcore
 		Cepoll_descriptors = 'epoll_descriptors'.freeze
 		Cfile_cache = 'file_cache_threshold'.freeze
 		Cgroup = 'group'.freeze
+		CHEAD = 'HEAD'.freeze
 		Chost = 'host'.freeze
 		Cincoming = 'incoming'.freeze
 		Ckeepalive = 'keepalive'.freeze
@@ -227,7 +231,7 @@ module Swiftcore
 					dr = @docroot_map[client_name]
 					fc = @file_cache_map[client_name]
 					if data = fc[path_info]
-						clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{data.last}\r\nContent-Length: #{data[1]}\r\n\r\n"
+						clnt.send_data data.last
 						clnt.send_data data.first
 						clnt.close_connection_after_writing
 						true
@@ -235,15 +239,22 @@ module Swiftcore
 						#ct = ::MIME::Types.type_for(path).first || Caos
 						ct = @typer.simple_type_for(path) || Caos
 						fsize = File.size(path)
-						if fsize > @chunked_encoding_threshold
+						if fsize <= @chunked_encoding_threshold
+							content_line = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
+							unless @request_method == CHEAD
+								clnt.send_data content_line
+								clnt.send_file_data path
+							end
+							fd = File.read(path)
+							#fc[path_info] = [fd,fd.length,ct]
+							fc[path_info] = [fd,content_line]
+							clnt.close_connection_after_writing
+						elsif clnt.http_version != C1_0 && fsize > @chunked_encoding_threshold
 							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n\r\n"
-							EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing}
+							EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing} unless @request_method == CHEAD
 						else
 							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
-							clnt.send_file_data path
-							fd = File.read(path)
-							fc[path_info] = [fd,fd.length,ct]
-							clnt.close_connection_after_writing
+							EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>false)) {clnt.close_connection_after_writing} unless @request_method == CHEAD
 						end
 						true
 					else
@@ -434,7 +445,7 @@ puts e.backtrace.join("\n")
 				@data = Deque.new
 				#@data = []
 				@data_pos = 0
-				@name = @uri = nil
+				@name = @uri = @http_version = @request_method = nil
 				super
 			end
 
@@ -445,22 +456,24 @@ puts e.backtrace.join("\n")
 				else
 					# Note the \0 below.  intern() blows up when passed a \0.  People who are trying to break a server like to pass \0s.  This should cope with that.
 					if data =~ /^Host:\s*([^\r\0:]+)/
-						# NOTE: Should I be using intern for this?  It might not
-						# be a good idea.
+						# Still wondering whether it is worth it to use intern here.
 						@name = $1.intern
-						
-						data =~ /\s([^\s\?]*)/
-						@uri = $1
-						@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete('%')].pack('H*')} if @uri =~ /%/
 						@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
-						ProxyBag.add_frontend_client(self,@data,data)
 					elsif data =~ /\r\n\r\n/
 						@name = ProxyBag.default_name
-						data =~ /\s([^\s\?]*)/
-						@uri = $1
-						@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete('%')].pack('H*')} if @uri =~ /%/
-						ProxyBag.add_frontend_client(self,@data,data)
 					end
+					data =~ /^(\w+)\s+([^\s\?]+).*(1.\d)/
+					@uri = $2
+					@http_version = $3
+					@request_method = $1
+					@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete('%')].pack('H*')} if @uri =~ /%/
+					if @http_version == C1_0
+						@keepalive = false
+					else
+						@keepalive = data =~ /^Connection:\s*close/m ? false : true
+					end
+					ProxyBag.add_frontend_client(self,@data,data)
+
 #					r = consume_data(data)
 #
 #					close_connection unless r
@@ -527,9 +540,9 @@ puts e.backtrace.join("\n")
 				ProxyBag.remove_client(self) unless @associate
 			end
 
-			def uri
-				@uri
-			end
+			def uri; @uri; end
+			def request_method; @request_method; end
+			def http_version; @http_version; end
 
 			def setup_for_redeployment
 				@data_pos = 0
