@@ -33,6 +33,8 @@ module Swiftcore
 		# though, using them makes a small but measurable difference, and those
 		# small differences add up....
 		C_empty = ''.freeze
+		C_header_close = 'HTTP/1.1 200 OK\r\nConnection: close\r\n'.freeze
+		C_header_keepalive = 'HTTP/1.1 200 OK\r\n'.freeze
 		C_slash = '/'.freeze
 		C_slashindex_html = '/index.html'.freeze
 		C1_0 = '1.0'.freeze
@@ -43,6 +45,7 @@ module Swiftcore
 		Ccluster_address = 'cluster_address'.freeze
 		Ccluster_port = 'cluster_port'.freeze
 		Ccluster_server = 'cluster_server'.freeze
+		CConnection_close = "Connection: close\r\n".freeze
 		CBackendAddress = 'BackendAddress'.freeze
 		CBackendPort = 'BackendPort'.freeze
 		Cchunked_encoding_threshold = 'chunked_encoding_threshold'.freeze
@@ -228,11 +231,12 @@ module Swiftcore
 				def serve_static_file(clnt)
 					path_info = clnt.uri
 					client_name = clnt.name
+					request_method = clnt.request_method
 					dr = @docroot_map[client_name]
 					fc = @file_cache_map[client_name]
 					if data = fc[path_info]
 						clnt.send_data data.last
-						clnt.send_data data.first
+						clnt.send_data data.first unless request_method == CHEAD
 						clnt.close_connection_after_writing
 						true
 					elsif path = find_static_file(dr,path_info,client_name)
@@ -240,21 +244,21 @@ module Swiftcore
 						ct = @typer.simple_type_for(path) || Caos
 						fsize = File.size(path)
 						if fsize <= @chunked_encoding_threshold
-							content_line = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
-							unless @request_method == CHEAD
-								clnt.send_data content_line
+							header_line = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
+							unless request_method == CHEAD
+								clnt.send_data header_line
 								clnt.send_file_data path
 							end
 							fd = File.read(path)
 							#fc[path_info] = [fd,fd.length,ct]
-							fc[path_info] = [fd,content_line]
+							fc[path_info] = [fd,header_line]
 							clnt.close_connection_after_writing
 						elsif clnt.http_version != C1_0 && fsize > @chunked_encoding_threshold
 							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n\r\n"
-							EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing} unless @request_method == CHEAD
+							EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing} unless request_method == CHEAD
 						else
 							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
-							EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>false)) {clnt.close_connection_after_writing} unless @request_method == CHEAD
+							EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>false)) {clnt.close_connection_after_writing} unless request_method == CHEAD
 						end
 						true
 					else
@@ -462,15 +466,12 @@ puts e.backtrace.join("\n")
 					elsif data =~ /\r\n\r\n/
 						@name = ProxyBag.default_name
 					end
-					data =~ /^(\w+)\s+([^\s\?]+).*(1.\d)/
-					@uri = $2
-					@http_version = $3
-					@request_method = $1
-					@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete('%')].pack('H*')} if @uri =~ /%/
-					if @http_version == C1_0
-						@keepalive = false
-					else
-						@keepalive = data =~ /^Connection:\s*close/m ? false : true
+					unless @uri
+						data =~ /^(\w+)\s+([^\s\?]+).*(1.\d)/
+						@uri = $2
+						@http_version = $3
+						@request_method = $1
+						@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete('%')].pack('H*')} if @uri =~ /%/
 					end
 					ProxyBag.add_frontend_client(self,@data,data)
 
