@@ -39,11 +39,16 @@ static void sptm_free (rb_splaymap* st)
 		delete st;
 }
 
-static VALUE sptm_new (VALUE self)
+static VALUE sptm_alloc (VALUE klass)
 {
 	rb_splaymap* st = new rb_splaymap;
-	VALUE v = Data_Wrap_Struct (SplayTreeMapClass, sptm_mark, sptm_free, st);
+	VALUE v = Data_Wrap_Struct (klass, sptm_mark, sptm_free, st);
 	return v;
+}
+
+static VALUE sptm_initialize (VALUE self)
+{
+	return Qnil;
 }
 
 static VALUE sptm_parent (VALUE self)
@@ -324,6 +329,25 @@ static VALUE sptm_at (VALUE self, VALUE key)
 	}
 }
 
+static VALUE sptm_has_key (VALUE self, VALUE key)
+{
+	rb_splaymap* st = NULL;
+	rb_splaymap_iterator q_iterator;
+	
+	char * skey = StringValuePtr(key);
+	
+	Data_Get_Struct(self, rb_splaymap, st);
+	
+	if (!st)
+		rb_raise (rb_eException, "No SplayTreeMap Object");
+		
+	q_iterator = (*st).find(skey);
+	if (q_iterator == (*st).end()) {
+		return Qnil;
+	} else {
+		return key;
+	}
+}
 
 static VALUE sptm_delete (VALUE self, VALUE key)
 {
@@ -505,7 +529,8 @@ extern "C" void Init_splaytreemap()
 	SwiftcoreModule = rb_define_module ("Swiftcore");
 	SplayTreeMapClass = rb_define_class_under (SwiftcoreModule, "SplayTreeMap", rb_cObject);
 
-	rb_define_module_function (SplayTreeMapClass, "new", (VALUE(*)(...))sptm_new, 0);
+	rb_define_alloc_func (SplayTreeMapClass, sptm_alloc);
+	rb_define_method (SplayTreeMapClass, "initialize", (VALUE(*)(...))sptm_initialize,0);
 	// ==
 	rb_define_method (SplayTreeMapClass, "[]", (VALUE(*)(...))sptm_at,1);
 	rb_define_method (SplayTreeMapClass, "[]=", (VALUE(*)(...))sptm_insert,2);
@@ -522,22 +547,22 @@ extern "C" void Init_splaytreemap()
 	rb_define_method (SplayTreeMapClass, "empty?", (VALUE(*)(...))sptm_empty,0);
 	rb_define_method (SplayTreeMapClass, "fetch", (VALUE(*)(...))sptm_at,1);
 	rb_define_method (SplayTreeMapClass, "first", (VALUE(*)(...))sptm_first,0);
-	// has_key?
+	rb_define_method (SplayTreeMapClass, "has_key?", (VALUE(*)(...))sptm_has_key,1);
 	// has_value?
-	// include?
+	rb_define_method (SplayTreeMapClass, "include?", (VALUE(*)(...))sptm_has_key,1);
 	rb_define_method (SplayTreeMapClass, "index", (VALUE(*)(...))sptm_index,1);
 	// indices
 	rb_define_method (SplayTreeMapClass, "insert", (VALUE(*)(...))sptm_insert,2);
 	rb_define_method (SplayTreeMapClass, "inspect", (VALUE(*)(...))sptm_inspect,0);
 	// invert
-	// key?
+	rb_define_method (SplayTreeMapClass, "key?", (VALUE(*)(...))sptm_has_key,1);
 	rb_define_method (SplayTreeMapClass, "keys", (VALUE(*)(...))sptm_keys,0);
 	rb_define_method (SplayTreeMapClass, "last", (VALUE(*)(...))sptm_last,0);
 	rb_define_method (SplayTreeMapClass, "length", (VALUE(*)(...))sptm_size,0);
 	rb_define_method (SplayTreeMapClass, "max_capacity", (VALUE(*)(...))sptm_max_capacity,0);
 	rb_define_method (SplayTreeMapClass, "max_size", (VALUE(*)(...))sptm_get_max_size,0);
 	rb_define_method (SplayTreeMapClass, "max_size=", (VALUE(*)(...))sptm_set_max_size,1);
-	// member?
+	rb_define_method (SplayTreeMapClass, "member?", (VALUE(*)(...))sptm_has_key,1);
 	rb_define_method (SplayTreeMapClass, "parent", (VALUE(*)(...))sptm_parent,0);
 	rb_define_method (SplayTreeMapClass, "pop", (VALUE(*)(...))sptm_pop_back,0);
 	rb_define_method (SplayTreeMapClass, "replace", (VALUE(*)(...))sptm_replace,1);
@@ -546,6 +571,7 @@ extern "C" void Init_splaytreemap()
 	rb_define_method (SplayTreeMapClass, "to_a", (VALUE(*)(...))sptm_to_a,0);
 	rb_define_method (SplayTreeMapClass, "to_s", (VALUE(*)(...))sptm_to_s,0);
 	rb_define_method (SplayTreeMapClass, "values", (VALUE(*)(...))sptm_values,0);
+	// values_at
 
 	rb_include_module (SplayTreeMapClass, rb_mEnumerable);
 
