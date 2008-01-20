@@ -1,30 +1,58 @@
-begin
-	load_attempted ||= false
-	require 'digest/sha2'
-	require 'eventmachine'
-	require 'fastfilereaderext'
-	require 'swiftcore/types'
-	require 'swiftcore/deque'
-	require 'swiftcore/splaytreemap'
-	require 'swiftcore/streamer'
-#	require 'swiftcore/microparser'
-#	require 'ruby-prof'
-rescue LoadError => e
-	unless load_attempted
-		load_attempted = true
-		# Ugh.  Everything gets slower once rubygems are used.  So, for the
-		# best speed possible, don't install EventMachine or Swiftiply via
-		# gems.
-		require 'rubygems'
-		retry
-	end
-	raise e
-end
-
-
 module Swiftcore
 
-	#Deque = Array
+	# A little statemachine for loading requirements.  The intention is to
+	# only load rubygems if necessary, and to load the Deque and SplayTreeMap
+	# classes if they are available and set a constant accordingly so that
+	# the fallbacks (Array and Hash) can be used if they are not.
+	begin
+		load_state ||= :start
+		rubygems_loaded ||= false
+		require 'digest/sha2'
+		require 'eventmachine'
+		require 'fastfilereaderext'
+		require 'swiftcore/types'
+		
+		load_state = :deque
+		require 'swiftcore/deque'
+		HasDeque = true unless const_defined?(:HasDeque)
+		
+		load_state = :splaytreemap
+		require 'swiftcore/splaytreemap'
+		HasSplayTree = true unless const_defined?(:HasSplayTree)
+		
+		load_state = :remainder
+		require 'swiftcore/streamer'
+		require 'swiftcore/Swiftiply/etag_cache'
+		require 'swiftcore/Swiftiply/file_cache'
+		require 'swiftcore/Swiftiply/dynamic_request_cache'
+		require 'time'
+	#	require 'swiftcore/microparser'
+	#	require 'ruby-prof'
+	rescue LoadError => e
+		unless rubygems_loaded
+			# Ugh.  Everything gets slower once rubygems are used.  So, for the
+			# best speed possible, don't install EventMachine or Swiftiply via
+			# gems.
+			begin
+				require 'rubygems'
+				rubygems_loaded = true
+			rescue LoadError
+				raise e
+			end
+			retry
+		end
+		case load_state
+		when :deque
+			HasDeque = false unless const_defined?(:HasDeque)
+			retry
+		when :splaytreemap
+			HasSplayTree = false unless const_defined?(:HasSplayTree)
+			retry
+		end
+		raise e
+	end
+
+	Deque = Array unless HasDeque
 
 	module Swiftiply
 		Version = '0.6.3'
@@ -32,6 +60,7 @@ module Swiftcore
 		# Yeah, these constants look kind of tacky.  Inside of tight loops,
 		# though, using them makes a small but measurable difference, and those
 		# small differences add up....
+		C_asterisk = '*'.freeze
 		C_empty = ''.freeze
 		C_header_close = 'HTTP/1.1 200 OK\r\nConnection: close\r\n'.freeze
 		C_header_keepalive = 'HTTP/1.1 200 OK\r\n'.freeze
@@ -39,7 +68,9 @@ module Swiftcore
 		C_slashindex_html = '/index.html'.freeze
 		C1_0 = '1.0'.freeze
 		C1_1 = '1.1'.freeze
+		C_304 = "HTTP/1.1 304 Not Modified\r\n\r\n".freeze
 		Caos = 'application/octet-stream'.freeze
+		Cat = 'at'.freeze
 		Ccache_directory = 'cache_directory'.freeze
 		Ccache_extensions = 'cache_extensions'.freeze
 		Ccluster_address = 'cluster_address'.freeze
@@ -48,20 +79,27 @@ module Swiftcore
 		CConnection_close = "Connection: close\r\n".freeze
 		CBackendAddress = 'BackendAddress'.freeze
 		CBackendPort = 'BackendPort'.freeze
+		Ccertfile = 'certfile'.freeze
 		Cchunked_encoding_threshold = 'chunked_encoding_threshold'.freeze
 		Cdaemonize = 'daemonize'.freeze
 		Cdefault = 'default'.freeze
 		Cdescriptor_cache = 'descriptor_cache_threshold'.freeze
+		Cdescriptors = 'descriptors'.freeze
 		Cdocroot = 'docroot'.freeze
+		Cdynamic_request_cache = 'dynamic_request_cache'.freeze
+		Cenable_sendfile_404 = 'enable_sendfile_404'.freeze
 		Cepoll = 'epoll'.freeze
 		Cepoll_descriptors = 'epoll_descriptors'.freeze
+		Cetag_cache = 'etag_cache'.freeze
 		Cfile_cache = 'file_cache_threshold'.freeze
+		CGET = 'GET'.freeze
 		Cgroup = 'group'.freeze
 		CHEAD = 'HEAD'.freeze
 		Chost = 'host'.freeze
 		Cincoming = 'incoming'.freeze
 		Ckeepalive = 'keepalive'.freeze
 		Ckey = 'key'.freeze
+		Ckeyfile = 'keyfile'.freeze
 		Cmap = 'map'.freeze
 		Cmax_cache_size = 'max_cache_size'.freeze
 		Cmsg_expired = 'browser connection expired'.freeze
@@ -69,18 +107,24 @@ module Swiftcore
 		Cport = 'port'.freeze
 		Credeployable = 'redeployable'.freeze
 		Credeployment_sizelimit = 'redeployment_sizelimit'.freeze
+		Csendfileroot = 'sendfileroot'.freeze
+		Cservers = 'servers'.freeze
+		Cssl = 'ssl'.freeze
 		Csize = 'size'.freeze
 		Cswiftclient = 'swiftclient'.freeze
 		Cthreshold = 'threshold'.freeze
+		Ctimeslice = 'timeslice'.freeze
 		Ctimeout = 'timeout'.freeze
 		Curl = 'url'.freeze
 		Cuser = 'user'.freeze
+		Cwindow = 'window'.freeze
 
 		C_fsep = File::SEPARATOR
 		
 		RunningConfig = {}
 
 		class EMStartServerError < RuntimeError; end
+		class SwiftiplyLoggerNotFound < RuntimeError; end
 		
 		# The ProxyBag is a class that holds the client and the server queues,
 		# and that is responsible for managing them, matching them, and expiring
@@ -91,16 +135,19 @@ module Swiftcore
 			#@client_q = Hash.new {|h,k| h[k] = []}
 			@server_q = Hash.new {|h,k| h[k] = Deque.new}
 			#@server_q = Hash.new {|h,k| h[k] = []}
+			@logger = nil
 			@ctime = Time.now
 			@server_unavailable_timeout = 6
 			@id_map = {}
 			@reverse_id_map = {}
 			@incoming_map = {}
 			@docroot_map = {}
+			@sendfileroot_map = {}
 			@log_map = {}
 			@redeployable_map = {}
 			@file_cache_map = {}
-			@file_cache_threshold_map = {}
+			@dynamic_request_map = {}
+			@etag_cache_map = {}
 			@keys = {}
 			@demanding_clients = Hash.new {|h,k| h[k] = Deque.new}
 			#@demanding_clients = Hash.new {|h,k| h[k] = []}
@@ -116,6 +163,23 @@ module Swiftcore
 					@ctime
 				end
 
+				# Setter and Getter accessors for the logger.
+				def logger=(val)
+					@logger = val
+				end
+				
+				def logger
+					@logger
+				end
+				
+				def log_level=(val)
+					@log_level = val
+				end
+				
+				def log_level
+					@log_level
+				end
+				
 				# Returns the access key.  If an access key is set, then all new backend
 				# connections must send the correct access key before being added to
 				# the cluster as a valid backend.
@@ -158,6 +222,18 @@ module Swiftcore
 					@docroot_map.delete(name)
 				end
 
+				def add_incoming_sendfileroot(path,name)
+					@sendfileroot_map[name] = path
+				end
+				
+				def remove_incoming_sendfileroot(name)
+					@sendfileroot_map.delete(name)
+				end
+				
+				def get_sendfileroot(name)
+					@sendfileroot_map[name]
+				end
+				
 				def add_incoming_redeployable(limit,name)
 					@redeployable_map[name] = limit
 				end
@@ -172,6 +248,14 @@ module Swiftcore
 
 				def add_file_cache(cache,name)
 					@file_cache_map[name] = cache
+				end
+
+				def add_dynamic_request_cache(cache,name)
+					@dynamic_request_map[name] = cache
+				end
+
+				def add_etag_cache(cache,name)
+					@etag_cache_map[name] = cache
 				end
 
 				# Sets the default proxy destination, if requests are received
@@ -212,6 +296,19 @@ module Swiftcore
 					@chunked_encoding_threshold = val
 				end
 
+				# Swiftiply maintains caches of small static files, etags, and
+				# dynamnic request paths for each cluster of backends.
+				# A timer is created when each cache is created, to do the
+				# initial update.  Thereafer, the verification method on the
+				# cache returns the number of seconds to wait before running
+				# again.
+				
+				def verify_cache(cache)
+					EventMachine.add_timer(cache.check_verification_queue) do
+						verify_cache(cache)
+					end
+				end
+				
 				# Handle static files.  It employs an extension to efficiently
 				# handle large files, and depends on an addition to
 				# EventMachine, send_file_data(), to efficiently handle small
@@ -220,47 +317,76 @@ module Swiftcore
 				# requests per second with small files (i.e. under 4k).  I think
 				# this can still be improved upon for small files.
 				#
-				# Todo for 0.7.0 -- add etag/if-modified/if-modified-since
-				# support.
-				#
 				# TODO: Add support for logging static file delivery if wanted.
 				#   The ideal logging would probably be to Analogger since it'd
 				#   limit the performance impact of the the logging.
 				#
 				
-				def serve_static_file(clnt)
-					path_info = clnt.uri
-					client_name = clnt.name
+				def serve_static_file(clnt,dr = nil)
 					request_method = clnt.request_method
-					dr = @docroot_map[client_name]
-					fc = @file_cache_map[client_name]
-					if data = fc[path_info]
-						clnt.send_data data.last
-						clnt.send_data data.first unless request_method == CHEAD
-						clnt.close_connection_after_writing
-						true
-					elsif path = find_static_file(dr,path_info,client_name)
-						#ct = ::MIME::Types.type_for(path).first || Caos
-						ct = @typer.simple_type_for(path) || Caos
-						fsize = File.size(path)
-						if fsize <= @chunked_encoding_threshold
-							header_line = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
-							unless request_method == CHEAD
-								clnt.send_data header_line
-								clnt.send_file_data path
+					
+					# Only GET and HEAD requests can return a file.
+					if request_method == CGET || request_method == CHEAD
+						path_info = clnt.uri
+						client_name = clnt.name
+						dr ||= @docroot_map[client_name]
+						fc = @file_cache_map[client_name]
+						if data = fc[path_info]
+							none_match = clnt.none_match
+							same_response = case
+								when request_method == CHEAD : false
+								when none_match && none_match == C_asterisk : false
+								when none_match && !none_match.strip.split(/\s*,\s*/).include?(data[1]) : false
+								else none_match
+								end
+	
+							if same_response
+								clnt.send_data C_304
+							else
+								#clnt.send_data data.last
+								#clnt.send_data data.first unless request_method == CHEAD
+								unless request_method == CHEAD
+									clnt.send_data data.last + data.first
+								else
+									clnt.send_data data.last
+								end
 							end
-							fd = File.read(path)
-							#fc[path_info] = [fd,fd.length,ct]
-							fc[path_info] = [fd,header_line]
 							clnt.close_connection_after_writing
-						elsif clnt.http_version != C1_0 && fsize > @chunked_encoding_threshold
-							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n\r\n"
-							EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing} unless request_method == CHEAD
-						else
-							clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
-							EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>false)) {clnt.close_connection_after_writing} unless request_method == CHEAD
+							true
+						elsif path = find_static_file(dr,path_info,client_name)
+							none_match = clnt.none_match
+							etag,mtime = @etag_cache_map[client_name].etag_mtime(path)
+							same_response = nil
+							same_response = case
+								when request_method == CHEAD : false
+								when none_match && none_match == C_asterisk : false
+								when none_match && !none_match.strip.split(/\s*,\s*/).include?(etag) : false
+								else none_match
+							end
+	
+							if same_response
+								clnt.send_data C_304
+								clnt.close_connection_after_writing
+							else
+								ct = @typer.simple_type_for(path) || Caos
+								fsize = File.size(path)
+								if fsize <= @chunked_encoding_threshold
+									header_line = "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
+									clnt.send_data header_line
+									clnt.send_file_data path unless request_method == CHEAD
+									fd = File.read(path)
+									fc[path_info] = [fd,etag,mtime,header_line]
+									clnt.close_connection_after_writing
+								elsif clnt.http_version != C1_0 && fsize > @chunked_encoding_threshold
+									clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n\r\n"
+									EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing} unless request_method == CHEAD
+								else
+									clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
+									EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>false)) {clnt.close_connection_after_writing} unless request_method == CHEAD
+								end
+							end
+							true
 						end
-						true
 					else
 						false
 					end
@@ -273,8 +399,8 @@ puts e
 puts e.backtrace.join("\n")
 					clnt.close_connection_after_writing
 					false
-				end
-
+				end				
+				
 				# Determine if the requested file, in the given docroot, exists
 				# and is a file (i.e. not a directory).
 				#
@@ -294,14 +420,21 @@ puts e.backtrace.join("\n")
 					clnt.create_time = @ctime
 					clnt.data_pos = clnt.data_len = 0 if clnt.redeployable = @redeployable_map[clnt.name]
 
-					unless @docroot_map.has_key?(clnt.name) and serve_static_file(clnt)
+					uri = clnt.uri
+					name = clnt.name
+					drc = @dynamic_request_map[name]
+					if drc[uri] || !(@docroot_map.has_key?(name) && serve_static_file(clnt))
+						# It takes two requests to add it to the verification queue.
+						unless drcval = drc[uri]
+							drc[uri] = drcval == false ? drc.add_to_verification_queue(uri) : false
+						end
 						data_q.unshift data
 						unless match_client_to_server_now(clnt)
 							#if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
 							if $&
 								@demanding_clients[$1].unshift clnt
 							else
-								@client_q[@incoming_map[clnt.name]].unshift(clnt)
+								@client_q[@incoming_map[name]].unshift(clnt)
 							end
 						end
 						#clnt.push ## wasted call, yes?
@@ -427,7 +560,7 @@ puts e.backtrace.join("\n")
 
 			end
 		end
-
+		
 		# The ClusterProtocol is the subclass of EventMachine::Connection used
 		# to communicate between Swiftiply and the web browser clients.
 
@@ -435,6 +568,7 @@ puts e.backtrace.join("\n")
 #			include Swiftcore::MicroParser
 
 			attr_accessor :create_time, :associate, :name, :redeployable, :data_pos, :data_len
+			attr_writer :uri
 
 			Crn = "\r\n".freeze
 			Crnrn = "\r\n\r\n".freeze
@@ -449,31 +583,69 @@ puts e.backtrace.join("\n")
 				@data = Deque.new
 				#@data = []
 				@data_pos = 0
-				@name = @uri = @http_version = @request_method = nil
+				@hmp = @name = @uri = @http_version = @request_method = @none_match = @done_parsing = nil
 				super
 			end
 
+			# States:
+			# uri
+			# name
+			# \r\n\r\n
+			#   If-None-Match
+			#   If-Modified-Since
+			# Done Parsing
 			def receive_data data
-				if @name
+				if @done_parsing
 					@data.unshift data
 					push
 				else
-					# Note the \0 below.  intern() blows up when passed a \0.  People who are trying to break a server like to pass \0s.  This should cope with that.
-					if data =~ /^Host:\s*([^\r\0:]+)/
-						# Still wondering whether it is worth it to use intern here.
-						@name = $1.intern
-						@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
-					elsif data =~ /\r\n\r\n/
-						@name = ProxyBag.default_name
-					end
 					unless @uri
 						data =~ /^(\w+)\s+([^\s\?]+).*(1.\d)/
-						@uri = $2
+						@uri = $2 || C_blank
 						@http_version = $3
 						@request_method = $1
 						@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete('%')].pack('H*')} if @uri =~ /%/
 					end
-					ProxyBag.add_frontend_client(self,@data,data)
+					unless @name
+						if data =~ /^Host:\s*([^\r\0:]+)/
+							@name = $1.intern
+							@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
+						end
+					end
+					if @hmp
+						d = @data.join
+					else
+						d = data
+					end
+					if d =~ /\r\n\r\n/
+						@name ||= ProxyBag.default_name
+						@done_parsing = true
+						if data =~ /^If-None-Match:\s*([^\r]+)/
+							@none_match = $1
+						end
+
+						ProxyBag.add_frontend_client(self,@data,data)
+					else
+						@data.unshift data
+					end
+
+
+					# Note the \0 below.  intern() blows up when passed a \0.  People who are trying to break a server like to pass \0s.  This should cope with that.
+#					if data =~ /^Host:\s*([^\r\0:]+)/
+#						# Still wondering whether it is worth it to use intern here.
+#						@name = $1.intern
+#						@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
+#					elsif data =~ /\r\n\r\n/
+#						@name = ProxyBag.default_name
+#					end
+#					unless @uri
+#						data =~ /^(\w+)\s+([^\s\?]+).*(1.\d)/
+#						@uri = $2
+#						@http_version = $3
+#						@request_method = $1
+#						@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete('%')].pack('H*')} if @uri =~ /%/
+#					end
+#					ProxyBag.add_frontend_client(self,@data,data)
 
 #					r = consume_data(data)
 #
@@ -544,6 +716,7 @@ puts e.backtrace.join("\n")
 			def uri; @uri; end
 			def request_method; @request_method; end
 			def http_version; @http_version; end
+			def none_match; @none_match; end
 
 			def setup_for_redeployment
 				@data_pos = 0
@@ -563,6 +736,8 @@ puts e.backtrace.join("\n")
 
 			def initialize *args
 				@name = self.class.bname
+				@permit_xsendfile = self.class.xsendfile
+				@enable_sendfile_404 = self.class.enable_sendfile_404
 				super
 			end
 
@@ -582,7 +757,7 @@ puts e.backtrace.join("\n")
 
 			def setup
 				@headers = ''
-				@headers_completed = false
+				@headers_completed = @dont_send_data = false
 				#@content_length = nil
 				@content_sent = 0
 			end
@@ -596,12 +771,14 @@ puts e.backtrace.join("\n")
 
 			def receive_data data
 				unless @initialized
-					preamble = data.slice!(0..24)
-					
+					# preamble = data.slice!(0..24)
+					preamble = data[0..24]
+					data = data[25..-1] || C_empty
 					keylen = preamble[23..24].to_i(16)
 					keylen = 0 if keylen < 0
 					key = keylen > 0 ? data.slice!(0..(keylen - 1)) : C_empty
-					if preamble[0..10] == Cswiftclient and key == ProxyBag.get_key(@name)
+					#if preamble[0..10] == Cswiftclient and key == ProxyBag.get_key(@name)
+					if preamble.index(Cswiftclient) == 0 and key == ProxyBag.get_key(@name)
 						@id = preamble[11..22]
 						ProxyBag.add_id(self,@id)
 						@initialized = true
@@ -615,7 +792,8 @@ puts e.backtrace.join("\n")
 					if data =~ /\r\n\r\n/
 						@headers_completed = true
 						h,data = data.split(/\r\n\r\n/,2)
-						@headers << h << Crnrn
+						#@headers << h << Crnrn
+						@headers << h
 						if @headers =~ /Content-[Ll]ength:\s*([^\r]+)/
 							@content_length = $1.to_i
 						elsif @headers =~ /Transfer-encoding:\s*chunked/
@@ -623,20 +801,42 @@ puts e.backtrace.join("\n")
 						else
 							@content_length = 0
 						end
-						@associate.send_data @headers
+
+						if @permit_xsendfile && @headers =~ /X-[Ss]endfile:\s*([^\r]+)/
+							@associate.uri = $1
+							if ProxyBag.serve_static_file(@associate,ProxyBag.get_sendfileroot(@associate.name))
+								@dont_send_data = true
+							else
+								if @enable_sendfile_404
+									msg = "#{@associate.uri} could not be found."
+									@associate.send_data "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nContent-Type: text/html\r\nContent-Length: #{msg.length}\r\n\r\n#{msg}"
+									@associate.close_connection_after_writing
+									@dont_send_data = true
+								else
+									#@associate.send_data @headers
+									#@associate.send_data Crnrn
+									@associate.send_data @headers + Crnrn
+								end
+							end
+						else
+							#@associate.send_data @headers
+							#@associate.send_data Crnrn
+							@associate.send_data @headers + Crnrn
+						end
 					else
 						@headers << data
 					end
 				end
 
 				if @headers_completed
-					@associate.send_data data
+					@associate.send_data data unless @dont_send_data
 					@content_sent += data.length
 					if @content_length and @content_sent >= @content_length or data[-6..-1] == C0rnrn
-						@associate.close_connection_after_writing
-						@associate = nil
+						# If @dont_send_data is set, then the connection is going to be closed elsewhere.
+						@associate.close_connection_after_writing unless @dont_send_data
+						@associate = @headers_completed = @dont_send_data = nil
 						@headers = ''
-						@headers_completed = false
+						#@headers_completed = false
 						#@content_length = nil
 						@content_sent = 0
 						#setup
@@ -644,7 +844,8 @@ puts e.backtrace.join("\n")
 					end
 				end
 			# TODO: Log these errors!
-			rescue
+			rescue Exception => e
+				puts "Kaboom: #{e} -- #{e.backtrace.inspect}"
 				@associate.close_connection_after_writing if @associate
 				@associate = nil
 				setup
@@ -678,6 +879,22 @@ puts e.backtrace.join("\n")
 			def self.bname
 				@bname
 			end
+			
+			def self.xsendfile=(val)
+				@xsendfile = val
+			end
+			
+			def self.xsendfile
+				@xsendfile
+			end
+			
+			def self.enable_sendfile_404=(val)
+				@enable_sendfile_404 = val
+			end
+			
+			def self.enable_sendfile_404
+				@enable_sendfile_404
+			end
 		end
 
 		# Start the EventMachine event loop and create the front end and backend
@@ -687,15 +904,16 @@ puts e.backtrace.join("\n")
 		def self.run(config)
 			@existing_backends = {}
 			
-			# Default is to assume we want to try to turn epoll support on.  EM
+			# Default is to assume we want to try to turn epoll/kqueue support on.  EM
 			# ignores this on platforms that don't support it, so this is safe.
-			unless config.has_key?(Cepoll) and !config[Cepoll]
-				EventMachine.epoll
-				EventMachine.set_descriptor_table_size(4096 || config[Cepoll_descriptors])
-			end
+			EventMachine.epoll unless config.has_key?(Cepoll) and !config[Cepoll] rescue nil
+			EventMachine.kqueue unless config.has_key?(Ckqueue) and !config[Ckqueue] rescue nil
+			EventMachine.set_descriptor_table_size(config[Cepoll_descriptors] || config[Cdescriptors] || 4096) rescue nil
+			
 			EventMachine.run do
 				trap("HUP") {em_config(Swiftcore::SwiftiplyExec.parse_options); GC.start}
 				trap("INT") {EventMachine.stop_event_loop}
+				GC.start
 				em_config(config)
 				GC.start
 				#RubyProf.start
@@ -707,32 +925,115 @@ puts e.backtrace.join("\n")
 		end
 		
 		def self.em_config(config)
-			new_config = {}
-			if RunningConfig[Ccluster_address] != config[Ccluster_address] or RunningConfig[Ccluster_port] != config[Ccluster_port]
+			new_config = {Ccluster_address => [],Ccluster_port => [],Ccluster_server => {}}
+			
+			log_level = 0
+			# Deal with the logger first.
+			if lgcfg = config['logger']
+				type = lgcfg['type'] || 'Analogger'
 				begin
-			    	new_config[Ccluster_server] = EventMachine.start_server(
-                	config[Ccluster_address],
-                	config[Ccluster_port],
-                	ClusterProtocol)
-				rescue RuntimeError => e
-					advice = ''
-					if config[Ccluster_port] < 1024
-						advice << 'Make sure you have the correct permissions to use that port, and make sure there is nothing else running on that port.'
+					load_attempted ||= false
+					require "swiftcore/Swiftiply/loggers/#{type}"
+				rescue LoadError
+					if load_attempted
+						raise SwiftiplyLoggerNotFound.new("The logger that was specified, #{type}, could not be found.")
 					else
-						advice << 'Make sure there is nothing else running on that port.'
+						load_attempted = true
+						require 'rubygems'
+						retry
 					end
-					advice << "  The original error was:  #{e}\n"
-					raise EMStartServerError.new("The listener on #{config[Ccluster_address]}:#{config[Ccluster_port]} could not be started.\n#{advice}")
 				end
-				new_config[Ccluster_address] = config[Ccluster_address]
-				new_config[Ccluster_port] = config[Ccluster_port]
-		    	EventMachine.stop_server(RunningConfig[Ccluster_server]) if RunningConfig.has_key?(Ccluster_server)
-			else
-				new_config[Ccluster_server] = RunningConfig[Ccluster_server]
-				new_config[Ccluster_address] = RunningConfig[Ccluster_address]
-				new_config[Ccluster_port] = RunningConfig[Ccluster_port]
+				log_level = determine_log_level(lgcfg['level'])
+				begin
+					log_class = get_const_from_name(type,::Swiftcore::Swiftiply::Loggers)
+					
+					ProxyBag.logger = log_class.new(lgcfg)
+					ProxyBag.log_level = log_level
+					ProxyBag.logger.log('info',"Logger type #{type} started.") if log_level > 0
+				rescue NameError
+					raise SwiftiplyLoggerNameError.new("The logger class specified, Swiftcore::Swiftiply::Loggers::#{type} was not defined.")
+				end
+				
 			end
-		    	
+			
+			ssl_addresses = {}
+			# Determine which address/port combos should be running SSL.
+			(config[Cssl] || []).each do |sa|
+				if sa.has_key?(Cat)
+					ssl_addresses[sa[Cat]] = {Ccertfile => sa[Ccertfile], Ckeyfile => sa[Ckeyfile]}
+				end
+			end
+			 
+			addresses = (Array === config[Ccluster_address]) ? config[Ccluster_address] : [config[Ccluster_address]]
+			ports = (Array === config[Ccluster_port]) ? config[Ccluster_port] : [config[Ccluster_port]]
+			addrports = []
+			addresses.each do |address|
+				ports.each do |port|
+					addrport = "#{address}:#{port}"
+					addrports << addrport
+					
+					#if RunningConfig[Ccluster_address] != config[Ccluster_address] or RunningConfig[Ccluster_port] != config[Ccluster_port]
+					#if !RunningConfig[Ccluster_address].include?(address) or !RunningConfig[Ccluster_port].include?(port)
+					if (!RunningConfig.has_key?(Ccluster_address)) ||
+						(RunningConfig.has_key?(Ccluster_address) && !RunningConfig[Ccluster_address].include?(address)) ||
+						(RunningConfig.has_key?(Ccluster_port) && !RunningConfig[Ccluster_port].include?(port))
+						begin
+							# If this particular address/port runs SSL, check that the certificate and the
+							# key files exist and are readable, then create a special protocol class
+							# that embeds the certificate and key information.
+
+							if ssl_addresses.has_key?(addrport)
+								# TODO: LOG that the certfiles are missing instead of silently ignoring it.
+								next unless exists_and_is_readable(ssl_addresses[addrport][Ccertfile])
+								next unless exists_and_is_readable(ssl_addresses[addrport][Ckeyfile])
+
+								# Create a customized protocol object for each different address/port combination.
+								ssl_protocol = Class.new(ClusterProtocol)
+								ssl_protocol.class_eval <<EOC
+def post_init
+	start_tls({:cert_chain_file => "#{ssl_addresses[addrport][Ccertfile]}", :private_key_file => "#{ssl_addresses[addrport][Ckeyfile]}"})
+end
+EOC
+									ProxyBag.logger.log('info',"Opening SSL server on #{address}:#{port}") if log_level > 0 and log_level < 3
+									ProxyBag.logger.log('info',"Opening SSL server on #{address}:#{port} using key at #{ssl_addresses[addrport][Ckeyfile]} and certificate at #{ssl_addresses[addrport][Ccertfile]}")
+									new_config[Ccluster_server][addrport] = EventMachine.start_server(
+									address,
+									port,
+									ssl_protocol)
+							else
+								ProxyBag.logger.log('info',"Opening server on #{address}:#{port}") if ProxyBag.log_level > 0
+								new_config[Ccluster_server][addrport] = EventMachine.start_server(
+									address,
+									port,
+									ClusterProtocol)
+							end
+						rescue RuntimeError => e
+							advice = ''
+							if config[port] < 1024
+								advice << 'Make sure you have the correct permissions to use that port, and make sure there is nothing else running on that port.'
+							else
+								advice << 'Make sure there is nothing else running on that port.'
+							end
+							advice << "  The original error was:  #{e}\n"
+							msg = "The listener on #{address}:#{port} could not be started.\n#{advice}"
+							ProxyBag.logger.log('fatal',msg)
+							raise EMStartServerError.new(msg)
+						end
+						
+						new_config[Ccluster_address] << address
+						new_config[Ccluster_port] << port unless new_config[Ccluster_port].include?(port)
+					end
+				end
+			end
+		    
+			# Stop anything that is no longer in the config.
+			if RunningConfig.has_key?(Ccluster_server)
+				(RunningConfig[Ccluster_server].keys - addrports).each do |s|
+					ProxyBag.logger.log('info',"Stopping unused server #{s.inspect} out of #{RunningConfig[Ccluster_server].keys.inspect - RunningConfig[Ccluster_server].keys.inspect}")
+					EventMachine.stop_server(s)
+				end
+			end
+			
 			new_config[Coutgoing] = {}
 
 			config[Cmap].each do |m|
@@ -743,27 +1044,85 @@ puts e.backtrace.join("\n")
 					# uniquely identify a section.
 					hash = Digest::SHA256.hexdigest(m[Cincoming].sort.join('|')).intern
 					
-					filecache = Swiftcore::SplayTreeMap.new
+					# TODO: Should make a pure ruby variation that just uses a hash.
 					sz = 100
+					vw = 900
+					ts = 0.01
 					if m.has_key?(Cfile_cache)
 						sz = m[Cfile_cache][Csize] || 100
 						sz = 100 if sz < 0
+						vw = m[Cfile_cache][Cwindow] || 900
+						vw = 900 if vw < 0
+						ts = m[Cfile_cache][Ctimeslice] || 0.01
+						ts = 0.01 if ts < 0
 					end
-					filecache.max_size = sz
+					ProxyBag.logger.log('debug',"Creating File Cache; size=#{sz}, window=#{vw}, timeslice=#{ts}") if ProxyBag.log_level > 2
+					file_cache = Swiftcore::Swiftiply::FileCache.new(vw,ts,sz)
+					unless RunningConfig[:initialized]
+						EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(file_cache)}
+					end
+
+					sz = 100
+					vw = 900
+					ts = 0.01
+					if m.has_key?(Cdynamic_request_cache)
+						sz = m[Cdynamic_request_cache][Csize] || 100
+						sz = 100 if sz < 0
+						vw = m[Cdynamic_request_cache][Cwindow] || 900
+						vw = 900 if vw < 0
+						ts = m[Cdynamic_request_cache][Ctimeslice] || 0.01
+						ts = 0.01 if ts < 0
+					end
+					ProxyBag.logger.log('debug',"Creating Dynamic Request Cache; size=#{sz}, window=#{vw}, timeslice=#{ts}") if ProxyBag.log_level > 2
+					dynamic_request_cache = Swiftcore::Swiftiply::DynamicRequestCache.new(m[Cdocroot],vw,ts,sz)
+					unless RunningConfig[:initialized]
+						EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(dynamic_request_cache)}
+					end
+
+					sz = 100
+					vw = 900
+					ts = 0.01
+					if m.has_key?(Cetag_cache)
+						sz = m[Cetag_cache][Csize] || 100
+						sz = 100 if sz < 0
+						vw = m[Cetag_cache][Cwindow] || 900
+						vw = 900 if vw < 0
+						ts = m[Cetag_cache][Ctimeslice] || 0.01
+						ts = 0.01 if ts < 0
+					end
+					ProxyBag.logger.log('debug',"Creating ETag Cache; size=#{sz}, window=#{vw}, timeslice=#{ts}") if ProxyBag.log_level > 2
+					etag_cache = Swiftcore::Swiftiply::EtagCache.new(vw,ts,sz)
+					unless RunningConfig[:initialized]
+						EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(etag_cache)}
+					end
 
 					# For each incoming entry, do setup.
+					
 					new_config[Cincoming] = {}
 					m[Cincoming].each do |p_|
+						ProxyBag.logger.log('info',"Configuring incoming #{p}") if log_level > 1
 						p = p_.intern
 						new_config[Cincoming][p] = {}
 						ProxyBag.add_incoming_mapping(hash,p)
-						ProxyBag.add_file_cache(filecache,p)
+						ProxyBag.add_file_cache(file_cache,p)
+						ProxyBag.add_dynamic_request_cache(dynamic_request_cache,p)
+						ProxyBag.add_etag_cache(etag_cache,p)
 						
 						if m.has_key?(Cdocroot)
 							ProxyBag.add_incoming_docroot(m[Cdocroot],p)
 						else
 							ProxyBag.remove_incoming_docroot(p)
 						end
+						
+						if m.has_key?(Csendfileroot)
+							ProxyBag.add_incoming_sendfileroot(m[Csendfileroot],p)
+							permit_xsendfile = true
+						else
+							ProxyBag.remove_incoming_sendfileroot(p)
+							permit_xsendfile = false
+						end
+						
+						#m.has_key?(Csendfileroot) ? ProxyBag.add_incoming_sendfileroot(m[Csendfileroot],p) : ProxyBag.remove_incoming_sendfileroot(p)
 						
 						if m[Credeployable]
 							ProxyBag.add_incoming_redeployable(m[Credeployment_sizelimit] || 16384,p)
@@ -787,6 +1146,7 @@ puts e.backtrace.join("\n")
 						end
 							
 						m[Coutgoing].each do |o|
+							ProxyBag.logger.log('info',"  Configuring outgoing #{o}") if log_level > 2
 							ProxyBag.default_name = p if m[Cdefault]
 							if @existing_backends.has_key?(o)
 								new_config[Coutgoing][o] ||= RunningConfig[Coutgoing][o]
@@ -795,6 +1155,8 @@ puts e.backtrace.join("\n")
 								@existing_backends[o] = true
 								backend_class = Class.new(BackendProtocol)
 								backend_class.bname = hash
+								backend_class.xsendfile = permit_xsendfile
+								backend_class.enable_sendfile_404 = true if m[Cenable_sendfile_404]
 								host, port = o.split(/:/,2)
 								begin
 									new_config[Coutgoing][o] = EventMachine.start_server(host, port.to_i, backend_class)
@@ -852,6 +1214,40 @@ puts e.backtrace.join("\n")
 		rescue Errno::EPERM
 			raise "Failed to change the effective user to #{user} and the group to #{group}"
 		end
+		
+		def self.exists_and_is_readable(file)
+			FileTest.exist?(file) and FileTest.readable?(file)
+		end
+		
+		# There are 4 levels of logging supported.
+		#   :disabled means no logging
+		#   :minimal logs only 
+		def self.determine_log_level(lvl)
+			case lvl.to_s
+			when /^d|0/
+				0
+			when /^m|1/
+				1
+			when /^n|2/
+				2
+			when /^f|3/
+				3
+			else
+				1
+			end
+		end
+		
+		def self.get_const_from_name(name,space)
+			r = nil
+			space.constants.each do |c|
+				if c =~ /#{name}/i
+					r = c
+					break
+				end
+			end
+			"#{space.name}::#{r}".split('::').inject(Object) { |o,n| o.const_get n }
+		end
+		
 	end
 end
 
