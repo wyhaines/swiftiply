@@ -19,6 +19,10 @@ module Swiftcore
 		class FileCache < CacheBase
 			
 			def add(path,data,etag,mtime,header)
+				unless self[path]
+					add_to_verification_queue(path)
+					ProxyBag.logger.log('info',"Adding file #{path} to file cache") if ProxyBag.log_level > 2
+				end
 				self[path] = [data,etag,mtime,header]
 			end
 			

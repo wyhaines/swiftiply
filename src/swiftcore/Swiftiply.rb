@@ -288,11 +288,11 @@ module Swiftcore
 				# encoding.  This enforces a maximum threshold of 32k.
 				
 				def chunked_encoding_threshold
-					@chunked_enconding_threshold
+					@chunked_enconding_threshold || 32768
 				end
 				
 				def chunked_encoding_threshold=(val)
-					val = 32768 if val > 32768
+					val = 256*1024 if val > 256*1024
 					@chunked_encoding_threshold = val
 				end
 
@@ -304,6 +304,7 @@ module Swiftcore
 				# again.
 				
 				def verify_cache(cache)
+					@logger.log('info',"Checking #{cache.name.split.last} for #{cache.owners}") if @log_level == 3
 					EventMachine.add_timer(cache.check_verification_queue) do
 						verify_cache(cache)
 					end
@@ -338,17 +339,19 @@ module Swiftcore
 								when none_match && none_match == C_asterisk : false
 								when none_match && !none_match.strip.split(/\s*,\s*/).include?(data[1]) : false
 								else none_match
-								end
-	
+								end	
 							if same_response
 								clnt.send_data C_304
+								@logger.log('info',"GET #{path_info} 304") if @log_level > 1
 							else
 								#clnt.send_data data.last
 								#clnt.send_data data.first unless request_method == CHEAD
 								unless request_method == CHEAD
 									clnt.send_data data.last + data.first
+									@logger.log('info',"GET #{path_info} 200") if @log_level > 1
 								else
 									clnt.send_data data.last
+									@logger.log('info',"HEAD #{path_info} 200") if @log_level > 1
 								end
 							end
 							clnt.close_connection_after_writing
@@ -367,6 +370,7 @@ module Swiftcore
 							if same_response
 								clnt.send_data C_304
 								clnt.close_connection_after_writing
+								@logger.log('info',"GET #{path_info} 304") if @log_level > 1
 							else
 								ct = @typer.simple_type_for(path) || Caos
 								fsize = File.size(path)
@@ -375,7 +379,7 @@ module Swiftcore
 									clnt.send_data header_line
 									clnt.send_file_data path unless request_method == CHEAD
 									fd = File.read(path)
-									fc[path_info] = [fd,etag,mtime,header_line]
+									fc.add(path_info,fd,etag,mtime,header_line)
 									clnt.close_connection_after_writing
 								elsif clnt.http_version != C1_0 && fsize > @chunked_encoding_threshold
 									clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n\r\n"
@@ -384,6 +388,7 @@ module Swiftcore
 									clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
 									EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>false)) {clnt.close_connection_after_writing} unless request_method == CHEAD
 								end
+								@logger.log('info',"#{request_method} #{path_info} 200") if @log_level > 1
 							end
 							true
 						end
@@ -394,9 +399,8 @@ module Swiftcore
 					# dumb file IO error shouldn't take Swiftiply down.
 					# TODO: It should log these errors, though.
 				rescue Object => e
-					puts "path: #{dr.inspect} / #{path.inspect}"
-puts e
-puts e.backtrace.join("\n")
+					@logger.log('error',"Failed request for #{dr.inspect}/#{path.inspect} -- #{e} @ #{e.backtrace.inspect}") if @log_level > 0
+
 					clnt.close_connection_after_writing
 					false
 				end				
@@ -943,13 +947,13 @@ puts e.backtrace.join("\n")
 						retry
 					end
 				end
-				log_level = determine_log_level(lgcfg['level'])
+				log_level = determine_log_level(lgcfg['level'] || lgcfg['log_level'])
 				begin
 					log_class = get_const_from_name(type,::Swiftcore::Swiftiply::Loggers)
 					
 					ProxyBag.logger = log_class.new(lgcfg)
 					ProxyBag.log_level = log_level
-					ProxyBag.logger.log('info',"Logger type #{type} started.") if log_level > 0
+					ProxyBag.logger.log('info',"Logger type #{type} started; log level is #{log_level}.") if log_level > 0
 				rescue NameError
 					raise SwiftiplyLoggerNameError.new("The logger class specified, Swiftcore::Swiftiply::Loggers::#{type} was not defined.")
 				end
@@ -1029,7 +1033,7 @@ EOC
 			# Stop anything that is no longer in the config.
 			if RunningConfig.has_key?(Ccluster_server)
 				(RunningConfig[Ccluster_server].keys - addrports).each do |s|
-					ProxyBag.logger.log('info',"Stopping unused server #{s.inspect} out of #{RunningConfig[Ccluster_server].keys.inspect - RunningConfig[Ccluster_server].keys.inspect}")
+					ProxyBag.logger.log('info',"Stopping unused incoming server #{s.inspect} out of #{RunningConfig[Ccluster_server].keys.inspect - RunningConfig[Ccluster_server].keys.inspect}")
 					EventMachine.stop_server(s)
 				end
 			end
@@ -1042,7 +1046,8 @@ EOC
 					
 					# The hash of the "outgoing" config section.  It is used to
 					# uniquely identify a section.
-					hash = Digest::SHA256.hexdigest(m[Cincoming].sort.join('|')).intern
+					owners = m[Cincoming].sort.join('|')
+					hash = Digest::SHA256.hexdigest(owners).intern
 					
 					# TODO: Should make a pure ruby variation that just uses a hash.
 					sz = 100
@@ -1056,11 +1061,11 @@ EOC
 						ts = m[Cfile_cache][Ctimeslice] || 0.01
 						ts = 0.01 if ts < 0
 					end
+					
 					ProxyBag.logger.log('debug',"Creating File Cache; size=#{sz}, window=#{vw}, timeslice=#{ts}") if ProxyBag.log_level > 2
 					file_cache = Swiftcore::Swiftiply::FileCache.new(vw,ts,sz)
-					unless RunningConfig[:initialized]
-						EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(file_cache)}
-					end
+					file_cache.owners = owners
+					EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(file_cache)} unless RunningConfig[:initialized]
 
 					sz = 100
 					vw = 900
@@ -1075,9 +1080,8 @@ EOC
 					end
 					ProxyBag.logger.log('debug',"Creating Dynamic Request Cache; size=#{sz}, window=#{vw}, timeslice=#{ts}") if ProxyBag.log_level > 2
 					dynamic_request_cache = Swiftcore::Swiftiply::DynamicRequestCache.new(m[Cdocroot],vw,ts,sz)
-					unless RunningConfig[:initialized]
-						EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(dynamic_request_cache)}
-					end
+					dynamic_request_cache.owners = owners
+					EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(dynamic_request_cache)} unless RunningConfig[:initialized]
 
 					sz = 100
 					vw = 900
@@ -1092,15 +1096,14 @@ EOC
 					end
 					ProxyBag.logger.log('debug',"Creating ETag Cache; size=#{sz}, window=#{vw}, timeslice=#{ts}") if ProxyBag.log_level > 2
 					etag_cache = Swiftcore::Swiftiply::EtagCache.new(vw,ts,sz)
-					unless RunningConfig[:initialized]
-						EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(etag_cache)}
-					end
+					etag_cache.owners = owners
+					EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(etag_cache)} unless RunningConfig[:initialized]
 
 					# For each incoming entry, do setup.
 					
 					new_config[Cincoming] = {}
 					m[Cincoming].each do |p_|
-						ProxyBag.logger.log('info',"Configuring incoming #{p}") if log_level > 1
+						ProxyBag.logger.log('info',"Configuring incoming #{p_}") if log_level > 1
 						p = p_.intern
 						new_config[Cincoming][p] = {}
 						ProxyBag.add_incoming_mapping(hash,p)
@@ -1149,13 +1152,16 @@ EOC
 							ProxyBag.logger.log('info',"  Configuring outgoing #{o}") if log_level > 2
 							ProxyBag.default_name = p if m[Cdefault]
 							if @existing_backends.has_key?(o)
+								ProxyBag.logger.log('info','    Already running; skipping')
 								new_config[Coutgoing][o] ||= RunningConfig[Coutgoing][o]
 								next
 							else
 								@existing_backends[o] = true
 								backend_class = Class.new(BackendProtocol)
 								backend_class.bname = hash
+								ProxyBag.logger.log('info',"    Permit X-Sendfile") if permit_xsendfile and log_level > 2
 								backend_class.xsendfile = permit_xsendfile
+								ProxyBag.logger.log('info',"    Enable 404 on missing Sendfile resource") if m[Cenable_sendfile_404] and log_level > 2
 								backend_class.enable_sendfile_404 = true if m[Cenable_sendfile_404]
 								host, port = o.split(/:/,2)
 								begin
@@ -1176,6 +1182,7 @@ EOC
 						# Now stop everything that is still running but which isn't needed.
 						if RunningConfig.has_key?(Coutgoing)
 							(RunningConfig[Coutgoing].keys - new_config[Coutgoing].keys).each do |unneeded_server_key|
+								
 								EventMachine.stop_server(RunningConfig[Coutgoing][unneeded_server_key])
 							end
 						end
@@ -1223,6 +1230,7 @@ EOC
 		#   :disabled means no logging
 		#   :minimal logs only 
 		def self.determine_log_level(lvl)
+			puts "Raw level is #{lvl}"
 			case lvl.to_s
 			when /^d|0/
 				0

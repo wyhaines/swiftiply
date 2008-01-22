@@ -35,7 +35,6 @@ module Swiftcore
 					false
 				end
 			end
-
 		end
 	end
 end

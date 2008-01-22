@@ -1,7 +1,7 @@
 module Swiftcore
 	module Swiftiply
 		module CacheBaseMixin
-			attr_accessor :vw
+			attr_accessor :vw, :owners
 			
 			def add_to_verification_queue(path)
 				@vq.unshift(path)

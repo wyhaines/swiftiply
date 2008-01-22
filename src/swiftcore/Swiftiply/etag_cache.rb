@@ -51,7 +51,12 @@ module Swiftcore
 				digest = Digest::MD5.new
 				buffer = ''
 				File.open(path,ReadMode) {|fh| digest << buffer while fh.read(4096,buffer)}
-				[digest.hexdigest,File.mtime(path)]
+				etag = digest.hexdigest
+				unless self[path]
+					add_to_verification_queue(path)
+					ProxyBag.logger.log('info',"Adding ETag #{etag} for #{path} to ETag cache") if ProxyBag.log_level > 2
+				end
+				[etag,File.mtime(path)]
 			end
 		end
 	end
