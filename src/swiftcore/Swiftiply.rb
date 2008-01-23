@@ -292,10 +292,17 @@ module Swiftcore
 				end
 				
 				def chunked_encoding_threshold=(val)
-					val = 256*1024 if val > 256*1024
-					@chunked_encoding_threshold = val
+					@chunked_encoding_threshold = val > 32768 ? 32768 : val					
 				end
 
+				def cache_threshold
+					@cache_threshold || 32768
+				end
+				
+				def cache_threshold=(val)
+					@cache_threshold = val > 256*1024 ? 256*1024 : val
+				end
+				
 				# Swiftiply maintains caches of small static files, etags, and
 				# dynamnic request paths for each cluster of backends.
 				# A timer is created when each cache is created, to do the
@@ -374,20 +381,31 @@ module Swiftcore
 							else
 								ct = @typer.simple_type_for(path) || Caos
 								fsize = File.size(path)
-								if fsize <= @chunked_encoding_threshold
-									header_line = "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
+
+								header_line = "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
+
+								fd = nil
+								if fsize < @chunked_encoding_threshold
+									File.open(path) {|fh| fd = fh.sysread(fsize)}
 									clnt.send_data header_line
-									clnt.send_file_data path unless request_method == CHEAD
-									fd = File.read(path)
-									fc.add(path_info,fd,etag,mtime,header_line)
+									unless request_method == CHEAD
+										if fsize < 32768
+											clnt.send_file_data path
+										else
+											clnt.send_data fd
+										end
+									end
 									clnt.close_connection_after_writing
 								elsif clnt.http_version != C1_0 && fsize > @chunked_encoding_threshold
 									clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n\r\n"
 									EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing} unless request_method == CHEAD
 								else
-									clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
+									#clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
+									clnt.send_data header_line
 									EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>false)) {clnt.close_connection_after_writing} unless request_method == CHEAD
 								end
+								fc.add(path_info,fd || File.read(path),etag,mtime,header_line) if fsize < @cache_threshold
+								
 								@logger.log('info',"#{request_method} #{path_info} 200") if @log_level > 1
 							end
 							true
@@ -1200,6 +1218,7 @@ EOC
 			
 			ProxyBag.server_unavailable_timeout ||= config[Ctimeout]
 			ProxyBag.chunked_encoding_threshold = config[Cchunked_encoding_threshold] || 16384
+			ProxyBag.cache_threshold = config['cache_threshold'] || 102400
 			
 			unless RunningConfig[:initialized]
 				EventMachine.add_periodic_timer(2) { ProxyBag.expire_clients }
