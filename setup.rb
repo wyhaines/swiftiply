@@ -14,9 +14,17 @@ Package.setup("1.0") {
 	name "Swiftcore Swiftiply"
 
 	build_ext "fastfilereader"
-	translate(:ext, 'ext/fastfilereader/' => '/')
+	translate(:ext, 'ext/fastfilereader/' => '/swiftcore/')
 	#translate(:ext, 'ext/http11/' => 'iowa/')
 	ext "ext/fastfilereader/fastfilereaderext.so"
+
+	build_ext "deque"
+	translate(:ext, 'ext/deque/' => '/swiftcore/')
+	ext "ext/deque/deque.so"
+
+	build_ext "splaytree"
+	translate(:ext, 'ext/splaytree/' => '/swiftcore/')
+	ext "ext/splaytree/splaytreemap.so"
 
 	translate(:lib, 'src/' => '')
 	translate(:bin, 'bin/' => '')
@@ -32,5 +40,6 @@ Package.setup("1.0") {
 
 	unit_test "test/TC_ProxyBag.rb"
 	unit_test "test/TC_Swiftiply.rb"
+	unit_test "test/TC_Deque.rb"
 	true
 }
