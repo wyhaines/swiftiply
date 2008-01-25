@@ -308,7 +308,7 @@ class PackageSpecification_1_0
 			end
 			#TODO: refactor
 			self.class.declare_file_type(args) do |files, ignore_p, opt_rename_info|
-				files.each do |file|
+				(Array === files ? files : [files]).each do |file|
 					next if ignore_p && IGNORE_FILES.any?{|re| re.match(file)}
 					add_file(kind, file, opt_rename_info, &bin_callback)
 				end
