@@ -3,6 +3,7 @@ require 'external/test_support'
 SwiftcoreTestSupport.set_src_dir
 require 'rbconfig'
 require 'net/http'
+require 'net/https'
 require 'swiftcore/Swiftiply'
 require 'yaml'
 
@@ -17,6 +18,11 @@ class TC_Swiftiply < Test::Unit::TestCase
 cluster_address: 127.0.0.1
 cluster_port: 29998
 daemonize: false
+epoll: true
+descriptors: 20000
+logger:
+  type: stderror
+  log_level: 3
 map:
   - incoming:
     - 127.0.0.1
@@ -28,6 +34,16 @@ ECONF
 	
 	def get_url(hostname,port,url)
 		Net::HTTP.start(hostname,port) {|http| http.get(url)}
+	end
+
+	def get_url_https(hostname, port, url)
+		http = Net::HTTP.new(hostname, port)
+		http.use_ssl = true
+		http.start {http.request_get(url)}
+	end
+	
+	def get_url_1_0(hostname, port, url)
+		Net::HTTP.start(hostname,port) {|http| http.instance_variable_set('@curr_http_version','1.0');  http.get(url)}
 	end
 	
 	def post_url(hostname,port,url,data = nil)
@@ -73,7 +89,11 @@ ECONF
 		DeleteQueue << bigfile_path
 		
 		conf_file = File.join(dc,'test_serve_static_file.conf')
-		File.open(conf_file,'w+') {|fh| fh.write ConfBase.to_yaml}
+		conf = YAML.load(ConfBase.to_yaml)
+		conf['logger']['log_level'] = 1
+		#puts "\n\n#{conf.to_yaml}\n\n"
+		#sleep 15
+		File.open(conf_file,'w+') {|fh| fh.write conf.to_yaml}
 		DeleteQueue << conf_file
 		
 		assert_nothing_raised("setup failed") do
@@ -87,9 +107,16 @@ ECONF
 		end
 	
 		response = get_url('127.0.0.1',29998,smallfile_name)
+		small_etag = response['ETag']
 		assert_equal("alfalfa leafcutter bee\n",response.body)
 		
 		response = get_url('127.0.0.1',29998,bigfile_name)
+		big_etag = response['ETag']
+		assert_equal("I am a duck. I am a duck. ",response.body[0..25])
+		assert_equal("I am a duck. \n",response.body[-14..-1])
+		assert_equal(79000,response.body.length)
+		
+		response = get_url_1_0('127.0.0.1',29998,bigfile_name)
 		assert_equal("I am a duck. I am a duck. ",response.body[0..25])
 		assert_equal("I am a duck. \n",response.body[-14..-1])
 		assert_equal(79000,response.body.length)
@@ -98,9 +125,29 @@ ECONF
 		
 		ab = `which ab`.chomp
 		unless ab == ''
-			r = `#{ab} -n 10000 -c 25 http://127.0.0.1:29998/#{smallfile_name}`
+			r = `#{ab} -n 100000 -c 25 http://127.0.0.1:29998/#{smallfile_name}`
 			r =~ /^(Requests per second.*)$/
-			puts "10k files, concurrency of 25\n#{$1}"
+			puts "10k 22 byte files, concurrency of 25\n#{$1}\n"
+		end
+		unless ab == ''
+			r = `#{ab} -n 100000 -c 25 -H 'If-None-Match: #{small_etag}' http://127.0.0.1:29998/#{smallfile_name}`
+			r =~ /^(Requests per second.*)$/
+			puts "10k 22 byte files with etag, concurrency of 25\n#{$1}\n"
+		end
+		unless ab == ''
+			r = `#{ab} -n 100000 -i -c 25 http://127.0.0.1:29998/#{smallfile_name}`
+			r =~ /^(Requests per second.*)$/
+			puts "10k HEAD requests, concurrency of 25\n#{$1}\n"
+		end
+		unless ab == ''
+			r = `#{ab} -n 20000 -c 25 http://127.0.0.1:29998/#{bigfile_name}`
+			r =~ /^(Requests per second.*)$/
+			puts "10k 78000 byte files, concurrency of 25\n#{$1}\n"
+		end
+		unless ab == ''
+			r = `#{ab} -n 20000 -c 25 -H 'If-None-Match: #{big_etag}' http://127.0.0.1:29998/#{bigfile_name}`
+			r =~ /^(Requests per second.*)$/
+			puts "10k 78000 byte files with etag, concurrency of 25\n#{$1}\n"
 		end
 		
 		# And it is still correct?
@@ -108,6 +155,170 @@ ECONF
 		assert_equal("alfalfa leafcutter bee\n",response.body)
 	end
 
+	def test_serve_static_file_xsendfile
+		puts "\nTesting Static File Delivery via X-Sendfile"
+		dc = File.join(Dir.pwd,'TC_Swiftiply')
+		dr = File.join(dc,'test_serve_static_file_xsendfile')
+		
+		smallfile1_name = "smallfile1#{Time.now.to_i}"
+		smallfile1_path = File.join(dr,'pub',smallfile1_name)
+		File.open(smallfile1_path,'w') {|fh| fh.puts "alfalfa leafcutter bee"}
+		DeleteQueue << smallfile1_path
+		
+		smallfile2_name = "smallfile2#{Time.now.to_i}"
+		smallfile2_path = File.join(dr,'priv',smallfile2_name)
+		File.open(smallfile2_path,'w') {|fh| fh.puts "alfalfa leafcutter bee"}
+		DeleteQueue << smallfile2_path
+		
+		bigfile1_name = "bigfile1#{Time.now.to_i}"
+		bigfile1_path = File.join(dr,'pub',bigfile1_name)
+		File.open(bigfile1_path,'w+') {|fh| fh.write("#{'I am a duck. ' * 6}\n" * 1000)}
+		DeleteQueue << bigfile1_path
+		
+		bigfile2_name = "bigfile2#{Time.now.to_i}"
+		bigfile2_path = File.join(dr,'priv',bigfile2_name)
+		File.open(bigfile2_path,'w+') {|fh| fh.write("#{'I am a duck. ' * 6}\n" * 1000)}
+		DeleteQueue << bigfile2_path
+		
+		conf = YAML.load(ConfBase.to_yaml)
+		conf['map'].first['docroot'] = "#{@@testdir}/TC_Swiftiply/test_serve_static_file_xsendfile/pub"
+		conf['map'].first['sendfileroot'] = "#{@@testdir}/TC_Swiftiply/test_serve_static_file_xsendfile/priv"
+		conf['logger']['log_level'] = 1
+		
+		conf_file = File.join(dc,'test_serve_static_file_xsendfile.conf')
+		File.open(conf_file,'w+') {|fh| fh.write conf.to_yaml}
+		DeleteQueue << conf_file
+		
+		assert_nothing_raised("setup failed") do
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src ../../bin/swiftiply -c test_serve_static_file_xsendfile.conf"])
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src #{@@testdir}/TC_Swiftiply/test_serve_static_file_xsendfile/sendfile_client.rb 127.0.0.1:29999"])
+			# Make sure everything has time to start, connect, etc... before
+			# the tests are executed.
+			sleep 1
+		end
+
+		response = get_url('127.0.0.1',29998,smallfile1_name)
+		small_etag = response['ETag']
+		assert_equal("alfalfa leafcutter bee\n",response.body)
+
+		response = get_url('127.0.0.1',29998,smallfile2_name)
+		small_etag = response['ETag']
+		assert_equal("alfalfa leafcutter bee\n",response.body)		
+				
+		response = get_url('127.0.0.1',29998,bigfile1_name)
+		big_etag = response['ETag']
+		assert_equal("I am a duck. I am a duck. ",response.body[0..25])
+		assert_equal("I am a duck. \n",response.body[-14..-1])
+		assert_equal(79000,response.body.length)
+		
+		response = get_url_1_0('127.0.0.1',29998,bigfile1_name)
+		assert_equal("I am a duck. I am a duck. ",response.body[0..25])
+		assert_equal("I am a duck. \n",response.body[-14..-1])
+		assert_equal(79000,response.body.length)
+		
+		response = get_url('127.0.0.1',29998,bigfile2_name)
+		big_etag = response['ETag']
+		assert_equal("I am a duck. I am a duck. ",response.body[0..25])
+		assert_equal("I am a duck. \n",response.body[-14..-1])
+		assert_equal(79000,response.body.length)
+		
+		response = get_url_1_0('127.0.0.1',29998,bigfile2_name)
+		assert_equal("I am a duck. I am a duck. ",response.body[0..25])
+		assert_equal("I am a duck. \n",response.body[-14..-1])
+		assert_equal(79000,response.body.length)
+		
+		response = get_url('127.0.0.1',29998,'this_isnt_there')
+		assert_equal("this_isnt_there",response.to_hash['x-sendfile'].first)
+		assert(response.body =~ /Doing X-Sendfile to this_isnt_there/)
+	end
+	
+	def test_serve_static_file_xsendfile2
+		dc = File.join(Dir.pwd,'TC_Swiftiply')
+		dr = File.join(dc,'test_serve_static_file_xsendfile')
+		
+		smallfile2_name = "smallfile2#{Time.now.to_i}"
+		smallfile2_path = File.join(dr,'priv',smallfile2_name)
+		File.open(smallfile2_path,'w') {|fh| fh.puts "alfalfa leafcutter bee"}
+		DeleteQueue << smallfile2_path
+		
+		conf = YAML.load(ConfBase.to_yaml)
+		conf['map'].first['docroot'] = "#{@@testdir}/TC_Swiftiply/test_serve_static_file_xsendfile/pub"
+		conf['map'].first['sendfileroot'] = "#{@@testdir}/TC_Swiftiply/test_serve_static_file_xsendfile/priv"
+		conf['map'].first['enable_sendfile_404'] = 'true'
+		conf['logger']['log_level'] = 1
+		
+		conf_file = File.join(dc,'test_serve_static_file_xsendfile.conf')
+		File.open(conf_file,'w+') {|fh| fh.write conf.to_yaml}
+		DeleteQueue << conf_file
+		
+		assert_nothing_raised("setup failed") do
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src ../../bin/swiftiply -c test_serve_static_file_xsendfile.conf"])
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src #{@@testdir}/TC_Swiftiply/test_serve_static_file_xsendfile/sendfile_client.rb 127.0.0.1:29999"])
+			# Make sure everything has time to start, connect, etc... before
+			# the tests are executed.
+			sleep 1
+		end
+
+		response = get_url('127.0.0.1',29998,smallfile2_name)
+		small_etag = response['ETag']
+		assert_equal("alfalfa leafcutter bee\n",response.body)		
+		
+		response = get_url('127.0.0.1',29998,'this_isnt_there')
+		assert(Net::HTTPNotFound === response)
+		assert(response.body =~ /this_isnt_there could not be found/)
+	end	
+
+	def test_ssl
+		puts "\nTesting SSL"
+		dc = File.join(Dir.pwd,'TC_Swiftiply')
+		dr = File.join(dc,'test_ssl')
+		
+		smallfile_name = "smallfile#{Time.now.to_i}"
+		smallfile_path = File.join(dr,'pub',smallfile_name)
+		File.open(smallfile_path,'w') {|fh| fh.puts "alfalfa leafcutter bee"}
+		DeleteQueue << smallfile_path
+		
+		conf = YAML.load(ConfBase.to_yaml)
+		conf['map'].first['docroot'] = "#{@@testdir}/TC_Swiftiply/test_ssl/pub"
+		conf['ssl'] = []
+		conf['ssl'] << {'at' => '127.0.0.1:29998', 'certfile' => "#{@@testdir}/TC_Swiftiply/test_ssl/test.cert", 'keyfile' => "#{@@testdir}/TC_Swiftiply/test_ssl/test.key"}
+		conf['map'].first['sendfileroot'] = "#{@@testdir}/TC_Swiftiply/test_serve_static_file_xsendfile/priv"
+		conf['map'].first['enable_sendfile_404'] = 'true'
+		
+		conf_file = File.join(dc,'test_ssl.conf')
+		File.open(conf_file,'w+') {|fh| fh.write conf.to_yaml}
+		DeleteQueue << conf_file
+		
+		assert_nothing_raised("setup failed") do
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src ../../bin/swiftiply -c test_ssl.conf"])
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src #{@@testdir}/TC_Swiftiply/test_serve_static_file_xsendfile/sendfile_client.rb 127.0.0.1:29999"])
+			# Make sure everything has time to start, connect, etc... before
+			# the tests are executed.
+			sleep 1
+		end
+
+		response = get_url_https('127.0.0.1',29998,smallfile_name)
+		small_etag = response['ETag']
+		assert_equal("alfalfa leafcutter bee\n",response.body)		
+		
+		response = get_url_https('127.0.0.1',29998,'this_isnt_there')
+		assert(Net::HTTPNotFound === response)
+		assert(response.body =~ /this_isnt_there could not be found/)
+		
+		#ab = `which ab`.chomp
+		#unless ab == ''
+		#	r = `#{ab} -n 20000 -c 25 https://127.0.0.1:29998/#{smallfile_name}`
+		#	r =~ /^(Requests per second.*)$/
+		#	puts "10k 22 byte files through SSL, concurrency of 25\n#{$1}\n"
+		#end
+	end		
+		
 	def test_serve_static_file_from_cachedir
 		puts "\nTesting Static File Delivery From Cachedir"
 		dc = File.join(Dir.pwd,'TC_Swiftiply')
@@ -386,6 +597,7 @@ ECONF
 		File.open(conf_file,'w+') {|fh| fh.write ConfBase.to_yaml}
 		DeleteQueue << conf_file
 		
+		kq = []
 		assert_nothing_raised("setup failed") do
 			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
 				:cmd => ["#{Ruby} -I../../src ../../bin/swiftiply -c test_serve_mongrel.conf"])
@@ -405,6 +617,7 @@ ECONF
 		
 		ab = `which ab`.chomp
 		unless ab == ''
+			#r = `#{ab} -n 10000 -c 250 http://127.0.0.1:29998/hello`
 			r = `#{ab} -n 10000 -c 25 http://127.0.0.1:29998/hello`
 			r =~ /^(Requests per second.*)$/
 			puts "Swiftiply -> Swiftiplied Mongrel, concurrency of 25\n#{$1}"
@@ -422,6 +635,7 @@ ECONF
 			conf['map'].first.delete('docroot')
 			fh.write conf.to_yaml
 		end
+
 		DeleteQueue << conf_file
 		
 		smallfile_name = "xyzzy"

@@ -178,7 +178,7 @@ ECONF
 		path_info = "testfile#{Time.now.to_i}"
 		File.open(path_info,'w') {|fh| fh.puts "alfalfa leafcutter bee"}
 		assert_equal(File.join(dr,path_info),Swiftcore::Swiftiply::ProxyBag.find_static_file(dr,path_info,'foo'))
-		assert_nil(Swiftcore::Swiftiply::ProxyBag.find_static_file(dr,'xyzzy','foo'))
+		assert_equal(false,Swiftcore::Swiftiply::ProxyBag.find_static_file(dr,'xyzzy','foo'))
 		File.delete(path_info)
 	end
 	
