@@ -17,6 +17,7 @@ end
 module Swiftcore
 	module Swiftiply
 		class DynamicRequestCache < CacheBase
+			attr_accessor :one_client_name
 			
 			def initialize(docroot, vw, ts, maxsize)
 				@docroot = docroot
@@ -25,7 +26,7 @@ module Swiftcore
 			
 			def verify(path)
 				if self[path]
-					if ProxyBag.find_static_file(@docroot,path)
+					if ProxyBag.find_static_file(@docroot,path,@one_client_name)
 						self.delete path
 						false
 					else

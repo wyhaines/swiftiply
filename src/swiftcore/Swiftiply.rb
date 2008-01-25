@@ -950,6 +950,7 @@ module Swiftcore
 			new_config = {Ccluster_address => [],Ccluster_port => [],Ccluster_server => {}}
 			
 			log_level = 0
+			
 			# Deal with the logger first.
 			if lgcfg = config['logger']
 				type = lgcfg['type'] || 'Analogger'
@@ -975,7 +976,24 @@ module Swiftcore
 				rescue NameError
 					raise SwiftiplyLoggerNameError.new("The logger class specified, Swiftcore::Swiftiply::Loggers::#{type} was not defined.")
 				end
-				
+			else
+				# Default to the stderror logger with a log level of 0
+				begin
+					load_attempted ||= false
+					require "swiftcore/Swiftiply/loggers/stderror"
+				rescue LoadError
+					if load_attempted
+						raise SwiftiplyLoggerNotFound.new("The logger that was specified, #{type}, could not be found.")
+					else
+						load_attempted = true
+						require 'rubygems'
+						retry
+					end
+				end
+
+				log_class = get_const_from_name('stderror',::Swiftcore::Swiftiply::Loggers)
+				ProxyBag.logger = log_class.new(lgcfg)
+				ProxyBag.log_level = log_level
 			end
 			
 			ssl_addresses = {}
@@ -1123,6 +1141,10 @@ EOC
 					m[Cincoming].each do |p_|
 						ProxyBag.logger.log('info',"Configuring incoming #{p_}") if log_level > 1
 						p = p_.intern
+						
+						# The dynamic request cache may need to know a valid client name.
+						dynamic_request_cache.one_client_name ||= p
+						
 						new_config[Cincoming][p] = {}
 						ProxyBag.add_incoming_mapping(hash,p)
 						ProxyBag.add_file_cache(file_cache,p)
