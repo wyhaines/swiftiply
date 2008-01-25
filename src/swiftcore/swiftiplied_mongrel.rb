@@ -161,6 +161,7 @@ module Mongrel
 				# header MUST accompany all HTTP responses that go into a swiftiply
 				# keepalive connection, so just use the Response object to construct the
 				# 404 response.
+				response = HttpResponse.new(client)
 				response.status = 404
 				response.body = "#{params[Const::REQUEST_PATH]} not found"
 				response.finished
