@@ -14,7 +14,7 @@ Package.setup("1.0") {
 	name "Swiftcore Swiftiply"
 
 	build_ext "fastfilereader"
-	translate(:ext, 'ext/fastfilereader/' => '/swiftcore/')
+	translate(:ext, 'ext/fastfilereader/' => '/')
 	#translate(:ext, 'ext/http11/' => 'iowa/')
 	ext "ext/fastfilereader/fastfilereaderext.so"
 
