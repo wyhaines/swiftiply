@@ -33,6 +33,9 @@ class MongrelSwiftStart
   		opts.on('-P','--pidfiles [NUM]','Path to store PID files.') do |numm|
   			config[:num] = numm.to_i
   		end
+			opts.on('-e','--environment [ENV]','Set to production or development to change your environment setting.') do |env|
+				config[:env] = env.to_s
+			end
   	end.parse!
   	@config = defaults.update(config)
   end
