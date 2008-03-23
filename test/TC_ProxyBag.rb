@@ -154,7 +154,7 @@ ECONF
 		assert_nothing_raised do
 			pb.add_log('/foo/bar',:abcdef)
 		end
-		assert_equal('/foo/bar',pb.instance_variable_get('@log_map')[:abcdef])
+		assert_equal(['/foo/bar',1],pb.instance_variable_get('@log_map')[:abcdef])
 	end
 	
 	def test_default_name

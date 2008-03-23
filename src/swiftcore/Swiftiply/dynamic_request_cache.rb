@@ -25,7 +25,7 @@ module Swiftcore
 			end
 			
 			def verify(path)
-				if self[path]
+				if @docroot && self[path]
 					if ProxyBag.find_static_file(@docroot,path,@one_client_name)
 						self.delete path
 						false

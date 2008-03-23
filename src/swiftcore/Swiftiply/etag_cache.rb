@@ -50,11 +50,12 @@ module Swiftcore
 			def calculate_etag(path)
 				digest = Digest::MD5.new
 				buffer = ''
+				# This seems to be the fastest of several different ways to read a file for generating a digest.
 				File.open(path,ReadMode) {|fh| digest << buffer while fh.read(4096,buffer)}
 				etag = digest.hexdigest
 				unless self[path]
 					add_to_verification_queue(path)
-					ProxyBag.logger.log('info',"Adding ETag #{etag} for #{path} to ETag cache") if ProxyBag.log_level > 2
+					ProxyBag.log(owner_hash).log('info',"Adding ETag #{etag} for #{path} to ETag cache") if ProxyBag.level(owner_hash) > 2
 				end
 				[etag,File.mtime(path)]
 			end

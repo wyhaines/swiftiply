@@ -7,10 +7,12 @@ module Swiftcore
 	begin
 		load_state ||= :start
 		rubygems_loaded ||= false
+		require 'socket'
 		require 'digest/sha2'
 		require 'eventmachine'
 		require 'fastfilereaderext'
 		require 'swiftcore/types'
+		require 'swiftcore/Swiftiply/mocklog'
 		
 		load_state = :deque
 		require 'swiftcore/deque'
@@ -91,7 +93,7 @@ module Swiftcore
 		Cepoll = 'epoll'.freeze
 		Cepoll_descriptors = 'epoll_descriptors'.freeze
 		Cetag_cache = 'etag_cache'.freeze
-		Cfile_cache = 'file_cache_threshold'.freeze
+		Cfile_cache = 'file_cache'.freeze
 		CGET = 'GET'.freeze
 		Cgroup = 'group'.freeze
 		CHEAD = 'HEAD'.freeze
@@ -157,6 +159,8 @@ module Swiftcore
 
 			@dcnt = 0
 
+			MockLog = Swiftcore::Swiftiply::MockLog.new
+			
 			class << self
 
 				def now
@@ -243,9 +247,25 @@ module Swiftcore
 				end
 				
 				def add_log(log,name)
-					@log_map[name] = log
+					@log_map[name] = [log,1]
 				end
 
+				def log(name)
+					(@log_map[name] && @log_map[name].first) || MockLog
+				end
+				
+				def remove_log(name)
+					@log_map.delete(name)
+				end
+				
+				def set_level(level,name)
+					@log_map[name][1] = level
+				end
+				
+				def level(name)
+					(@log_map[name] && @log_map[name].last) || 0
+				end
+				
 				def add_file_cache(cache,name)
 					@file_cache_map[name] = cache
 				end
@@ -311,8 +331,9 @@ module Swiftcore
 				# again.
 				
 				def verify_cache(cache)
-					@logger.log('info',"Checking #{cache.name.split.last} for #{cache.owners}") if @log_level == 3
-					EventMachine.add_timer(cache.check_verification_queue) do
+					log(cache.owner_hash).log('info',"Checking #{cache.class.name} for #{cache.owners}") if level(cache.owner_hash) == 3
+					new_interval = cache.check_verification_queue
+					EventMachine.add_timer(new_interval) do
 						verify_cache(cache)
 					end
 				end
@@ -349,16 +370,19 @@ module Swiftcore
 								end	
 							if same_response
 								clnt.send_data C_304
-								@logger.log('info',"GET #{path_info} 304") if @log_level > 1
+								oh = fc.owner_hash
+								log(oh).log('info',"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
 								#clnt.send_data data.last
 								#clnt.send_data data.first unless request_method == CHEAD
 								unless request_method == CHEAD
 									clnt.send_data data.last + data.first
-									@logger.log('info',"GET #{path_info} 200") if @log_level > 1
+									oh = fc.owner_hash
+									log(oh).log('info',"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 200 #{data.first.size}") if level(oh) > 1
 								else
 									clnt.send_data data.last
-									@logger.log('info',"HEAD #{path_info} 200") if @log_level > 1
+									oh = fc.owner_hash
+									log(oh).log('info',"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"HEAD #{path_info} HTTP/#{clnt.http_version}\" 200 -") if level(oh) > 1
 								end
 							end
 							clnt.close_connection_after_writing
@@ -377,7 +401,8 @@ module Swiftcore
 							if same_response
 								clnt.send_data C_304
 								clnt.close_connection_after_writing
-								@logger.log('info',"GET #{path_info} 304") if @log_level > 1
+								oh = fc.owner_hash
+								log(oh).log('info',"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
 								ct = @typer.simple_type_for(path) || Caos
 								fsize = File.size(path)
@@ -404,9 +429,10 @@ module Swiftcore
 									clnt.send_data header_line
 									EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>false)) {clnt.close_connection_after_writing} unless request_method == CHEAD
 								end
-								fc.add(path_info,fd || File.read(path),etag,mtime,header_line) if fsize < @cache_threshold
+								fc.add(path_info, path, fd || File.read(path),etag,mtime,header_line) if fsize < @cache_threshold
 								
-								@logger.log('info',"#{request_method} #{path_info} 200") if @log_level > 1
+								oh = fc.owner_hash
+								log(oh).log('info',"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"#{request_method} #{path_info} HTTP/#{clnt.http_version}\" 200 #{fsize}") if level(oh) > 1
 							end
 							true
 						end
@@ -417,6 +443,7 @@ module Swiftcore
 					# dumb file IO error shouldn't take Swiftiply down.
 					# TODO: It should log these errors, though.
 				rescue Object => e
+					puts e
 					@logger.log('error',"Failed request for #{dr.inspect}/#{path.inspect} -- #{e} @ #{e.backtrace.inspect}") if @log_level > 0
 
 					clnt.close_connection_after_writing
@@ -948,54 +975,13 @@ module Swiftcore
 		
 		def self.em_config(config)
 			new_config = {Ccluster_address => [],Ccluster_port => [],Ccluster_server => {}}
-			
-			log_level = 0
-			
-			# Deal with the logger first.
-			if lgcfg = config['logger']
-				type = lgcfg['type'] || 'Analogger'
-				begin
-					load_attempted ||= false
-					require "swiftcore/Swiftiply/loggers/#{type}"
-				rescue LoadError
-					if load_attempted
-						raise SwiftiplyLoggerNotFound.new("The logger that was specified, #{type}, could not be found.")
-					else
-						load_attempted = true
-						require 'rubygems'
-						retry
-					end
-				end
-				log_level = determine_log_level(lgcfg['level'] || lgcfg['log_level'])
-				begin
-					log_class = get_const_from_name(type,::Swiftcore::Swiftiply::Loggers)
-					
-					ProxyBag.logger = log_class.new(lgcfg)
-					ProxyBag.log_level = log_level
-					ProxyBag.logger.log('info',"Logger type #{type} started; log level is #{log_level}.") if log_level > 0
-				rescue NameError
-					raise SwiftiplyLoggerNameError.new("The logger class specified, Swiftcore::Swiftiply::Loggers::#{type} was not defined.")
-				end
-			else
-				# Default to the stderror logger with a log level of 0
-				begin
-					load_attempted ||= false
-					require "swiftcore/Swiftiply/loggers/stderror"
-				rescue LoadError
-					if load_attempted
-						raise SwiftiplyLoggerNotFound.new("The logger that was specified, #{type}, could not be found.")
-					else
-						load_attempted = true
-						require 'rubygems'
-						retry
-					end
-				end
 
-				log_class = get_const_from_name('stderror',::Swiftcore::Swiftiply::Loggers)
-				ProxyBag.logger = log_class.new(lgcfg)
-				ProxyBag.log_level = log_level
-			end
+			config['logger'] = {'log_level' => 0, 'type' => 'stderror'} unless config['logger']
 			
+			new_log = handle_logger_config(config['logger']) if config['logger']
+			ProxyBag.logger = new_log[:logger] if new_log
+			ProxyBag.log_level = log_level = new_log[:log_level] if new_log
+						
 			ssl_addresses = {}
 			# Determine which address/port combos should be running SSL.
 			(config[Cssl] || []).each do |sa|
@@ -1049,7 +1035,7 @@ EOC
 							end
 						rescue RuntimeError => e
 							advice = ''
-							if config[port] < 1024
+							if port < 1024
 								advice << 'Make sure you have the correct permissions to use that port, and make sure there is nothing else running on that port.'
 							else
 								advice << 'Make sure there is nothing else running on that port.'
@@ -1084,11 +1070,18 @@ EOC
 					# uniquely identify a section.
 					owners = m[Cincoming].sort.join('|')
 					hash = Digest::SHA256.hexdigest(owners).intern
-					
-					# TODO: Should make a pure ruby variation that just uses a hash.
+
+					if m['logger']
+						new_log = handle_logger_config(m['logger'])
+
+						ProxyBag.add_log(new_log[:logger],hash)
+						ProxyBag.set_level(new_log[:log_level],hash)
+					end
+															
 					sz = 100
 					vw = 900
 					ts = 0.01
+					
 					if m.has_key?(Cfile_cache)
 						sz = m[Cfile_cache][Csize] || 100
 						sz = 100 if sz < 0
@@ -1101,6 +1094,8 @@ EOC
 					ProxyBag.logger.log('debug',"Creating File Cache; size=#{sz}, window=#{vw}, timeslice=#{ts}") if ProxyBag.log_level > 2
 					file_cache = Swiftcore::Swiftiply::FileCache.new(vw,ts,sz)
 					file_cache.owners = owners
+					file_cache.owner_hash = hash
+
 					EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(file_cache)} unless RunningConfig[:initialized]
 
 					sz = 100
@@ -1117,6 +1112,7 @@ EOC
 					ProxyBag.logger.log('debug',"Creating Dynamic Request Cache; size=#{sz}, window=#{vw}, timeslice=#{ts}") if ProxyBag.log_level > 2
 					dynamic_request_cache = Swiftcore::Swiftiply::DynamicRequestCache.new(m[Cdocroot],vw,ts,sz)
 					dynamic_request_cache.owners = owners
+					dynamic_request_cache.owner_hash = hash
 					EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(dynamic_request_cache)} unless RunningConfig[:initialized]
 
 					sz = 100
@@ -1133,6 +1129,7 @@ EOC
 					ProxyBag.logger.log('debug',"Creating ETag Cache; size=#{sz}, window=#{vw}, timeslice=#{ts}") if ProxyBag.log_level > 2
 					etag_cache = Swiftcore::Swiftiply::EtagCache.new(vw,ts,sz)
 					etag_cache.owners = owners
+					etag_cache.owner_hash = hash
 					EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(etag_cache)} unless RunningConfig[:initialized]
 
 					# For each incoming entry, do setup.
@@ -1271,7 +1268,6 @@ EOC
 		#   :disabled means no logging
 		#   :minimal logs only 
 		def self.determine_log_level(lvl)
-			puts "Raw level is #{lvl}"
 			case lvl.to_s
 			when /^d|0/
 				0
@@ -1295,6 +1291,56 @@ EOC
 				end
 			end
 			"#{space.name}::#{r}".split('::').inject(Object) { |o,n| o.const_get n }
+		end
+		
+		def self.handle_logger_config(lgcfg = nil,handle_default = true)
+			new_logger = {}
+			if lgcfg
+				type = lgcfg['type'] || 'Analogger'
+				begin
+					load_attempted ||= false
+					require "swiftcore/Swiftiply/loggers/#{type}"
+				rescue LoadError
+					if load_attempted
+						raise SwiftiplyLoggerNotFound.new("The logger that was specified, #{type}, could not be found.")
+					else
+						load_attempted = true
+						require 'rubygems'
+						retry
+					end
+				end
+				new_logger[:log_level] = determine_log_level(lgcfg['level'] || lgcfg['log_level'])
+				begin
+					log_class = get_const_from_name(type,::Swiftcore::Swiftiply::Loggers)
+			
+					new_logger[:logger] = log_class.new(lgcfg)
+					new_logger[:logger].log('info',"Logger type #{type} started; log level is #{new_logger[:log_level]}.") if new_logger[:log_level] > 0
+				rescue NameError
+					raise SwiftiplyLoggerNameError.new("The logger class specified, Swiftcore::Swiftiply::Loggers::#{type} was not defined.")
+				end
+			elsif handle_default
+				# Default to the stderror logger with a log level of 0
+				begin
+					load_attempted ||= false
+					require "swiftcore/Swiftiply/loggers/stderror"
+				rescue LoadError
+					if load_attempted
+						raise SwiftiplyLoggerNotFound.new("The attempt to load the default logger (swiftcore/Swiftiply/loggers/stderror.rb) failed.  This should not happen.  Please double check your Swiftiply installation.")
+					else
+						load_attempted = true
+						require 'rubygems'
+						retry
+					end
+				end
+
+				log_class = get_const_from_name('stderror',::Swiftcore::Swiftiply::Loggers)
+				new_logger[:logger] = log_class.new(lgcfg)
+				new_logger[:log_level] = log_level
+			else
+				new_logger = nil
+			end
+			
+			new_logger
 		end
 		
 	end

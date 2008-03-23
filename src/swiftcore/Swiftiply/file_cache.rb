@@ -18,19 +18,23 @@ module Swiftcore
 	module Swiftiply
 		class FileCache < CacheBase
 			
-			def add(path,data,etag,mtime,header)
-				unless self[path]
-					add_to_verification_queue(path)
-					ProxyBag.logger.log('info',"Adding file #{path} to file cache") if ProxyBag.log_level > 2
+			def add(path_info,path,data,etag,mtime,header)
+				unless self[path_info]
+					add_to_verification_queue(path_info)
+					ProxyBag.log(owner_hash).log('info',"Adding file #{path} to file cache as #{path_info}") if ProxyBag.level(owner_hash) > 2
 				end
-				self[path] = [data,etag,mtime,header]
+				self[path_info] = [data,etag,mtime,path,header]
 			end
 			
-			def verify(path)
-				if f = self[path] and File.exist?(path)
-					mt = File.mtime(path)
-					if mt == f[2]
-						true
+			def verify(path_info)
+				if f = self[path_info]
+					if File.exist?(f[3])
+						mt = File.mtime(f[3])
+						if mt == f[2]
+							true
+						else
+							false
+						end
 					else
 						false
 					end

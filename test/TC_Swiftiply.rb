@@ -22,7 +22,7 @@ epoll: true
 descriptors: 20000
 logger:
   type: stderror
-  log_level: 3
+  log_level: 1
 map:
   - incoming:
     - 127.0.0.1
@@ -61,7 +61,7 @@ ECONF
 
 	def teardown
 		while f = DeleteQueue.pop do
-			 File.delete f if f
+			 File.delete f if f and FileTest.exist?(f)
 		end
 		 
 		while p = KillQueue.pop do
@@ -69,10 +69,12 @@ ECONF
 			Process.wait p if p
 		end
 	end
-	
+
+	#####	
 	# Test serving a small file (no chunked encoding) and a large file (chunked
 	# encoding).
-
+	#####
+	
 	def test_serve_static_file
 		puts "\nTesting Static File Delivery"
 		dc = File.join(Dir.pwd,'TC_Swiftiply')
@@ -155,6 +157,68 @@ ECONF
 		assert_equal("alfalfa leafcutter bee\n",response.body)
 	end
 
+	def test_serve_static_file_caches
+		puts "\nTesting caches"
+		dc = File.join(Dir.pwd,'TC_Swiftiply')
+		dr = File.join(dc,'test_serve_static_file')
+		
+		smallfile_name = "smallfile#{Time.now.to_i}"
+		smallfile_path = File.join(dr,smallfile_name)
+		File.open(smallfile_path,'w') {|fh| fh.puts "alfalfa leafcutter bee"}
+		DeleteQueue << smallfile_path		
+		
+		bigfile_name = "bigfile#{Time.now.to_i}"
+		bigfile_path = File.join(dr,bigfile_name)
+		File.open(bigfile_path,'w+') {|fh| fh.write("#{'I am a duck. ' * 6}\n" * 1000)}
+		DeleteQueue << bigfile_path
+		
+		conf_file = File.join(dc,'test_serve_static_file.conf')
+		conf = YAML.load(ConfBase.to_yaml)
+		conf['logger']['log_level'] = 3
+		conf['map'][0]['file_cache'] = {}
+		conf['map'][0]['file_cache']['window'] = 5
+		conf['map'][0]['logger'] = {}
+		conf['map'][0]['logger']['log_level'] = 3
+		conf['map'][0]['logger']['type'] = 'stderror'
+		
+		File.open(conf_file,'w+') {|fh| fh.write conf.to_yaml}
+		DeleteQueue << conf_file
+		
+		assert_nothing_raised("setup failed") do
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src ../../bin/swiftiply -c test_serve_static_file.conf"])
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src ../../bin/echo_client 127.0.0.1:29999"])
+			# Make sure everything has time to start, connect, etc... before
+			# the tests are executed.
+			sleep 1
+		end
+	
+		response = get_url('127.0.0.1',29998,smallfile_name)
+		small_etag = response['ETag']
+		assert_equal("alfalfa leafcutter bee\n",response.body)
+		File.delete smallfile_path
+		
+		response = get_url('127.0.0.1',29998,bigfile_name)
+		big_etag = response['ETag']
+		assert_equal("I am a duck. I am a duck. ",response.body[0..25])
+		assert_equal("I am a duck. \n",response.body[-14..-1])
+		assert_equal(79000,response.body.length)
+		
+		sleep 4
+
+		File.open(smallfile_path,'w') {|fh| fh.puts "alfalfa leafcutter bee too"}
+		
+		response = get_url('127.0.0.1',29998,smallfile_name)
+		small_etag = response['ETag']
+		assert_equal("alfalfa leafcutter bee too\n",response.body)
+	end
+	
+	#####
+	# Test the x-sendfile header support.
+	# Big and small files that do exist.
+	#####
+	
 	def test_serve_static_file_xsendfile
 		puts "\nTesting Static File Delivery via X-Sendfile"
 		dc = File.join(Dir.pwd,'TC_Swiftiply')
@@ -234,6 +298,10 @@ ECONF
 		assert(response.body =~ /Doing X-Sendfile to this_isnt_there/)
 	end
 	
+	#####
+	# Test x-sendfile handling for a file that doesn't exist.
+	#####
+	
 	def test_serve_static_file_xsendfile2
 		dc = File.join(Dir.pwd,'TC_Swiftiply')
 		dr = File.join(dc,'test_serve_static_file_xsendfile')
@@ -272,6 +340,10 @@ ECONF
 		assert(response.body =~ /this_isnt_there could not be found/)
 	end	
 
+	#####
+	# Setup an SSL connection and test a couple requests that use SSL.
+	#####
+	
 	def test_ssl
 		puts "\nTesting SSL"
 		dc = File.join(Dir.pwd,'TC_Swiftiply')
