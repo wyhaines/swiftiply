@@ -16,15 +16,19 @@ Package.setup("1.0") {
 	build_ext "fastfilereader"
 	translate(:ext, 'ext/fastfilereader/' => '/')
 	#translate(:ext, 'ext/http11/' => 'iowa/')
-	ext "ext/fastfilereader/fastfilereaderext.so"
 
+	ext "ext/fastfilereader/fastfilereaderext.so"
+	ext "ext/fastfilereader/fastfilereaderext.bundle"
+	
 	build_ext "deque"
 	translate(:ext, 'ext/deque/' => '/swiftcore/')
 	ext "ext/deque/deque.so"
+	ext "ext/deque/deque.bundle"
 
 	build_ext "splaytree"
 	translate(:ext, 'ext/splaytree/' => '/swiftcore/')
 	ext "ext/splaytree/splaytreemap.so"
+	ext "ext/splaytree/splaytreemap.bundle"
 
 	translate(:lib, 'src/' => '')
 	translate(:bin, 'bin/' => '')

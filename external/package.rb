@@ -118,7 +118,7 @@ module Actions
 			d = File.expand_path(File.join(dirs)).w32
 			FileUtils.install @source, d,
 				{:verbose => @options.verbose,
-				:noop => @options.noop, :mode => @mode }
+				:noop => @options.noop, :mode => @mode } rescue Errno::ENOENT
 		end
 
 		def hash
@@ -660,7 +660,7 @@ class PackageSpecification_1_0
 	end
 
 	def run_tasks
-		@tasks.each { |task| __send__ task }
+		@tasks.each { |task| puts "Doing #{task}"; __send__ task }
 	end
 end
 
