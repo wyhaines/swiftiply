@@ -1,13 +1,13 @@
 # The Swiftiply logging support is really written with Analogger in mind, since
 # the ideal logging solution should provide a minimal performance impact.
 
-require 'swiftcore/Analogger/EMClient'
+require 'swiftcore/Analogger/Client'
 
 module Swiftcore
 	module Swiftiply
 		module Loggers
 			class Analogger
-				def new(params)
+				def self.new(params)
 					lp = []
 					lp << params['service'] || 'swiftiply'
 					lp << params['host'] || '127.0.0.1'
