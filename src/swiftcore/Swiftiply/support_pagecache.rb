@@ -33,16 +33,19 @@ module Swiftcore
 				
 				def find_static_file(dr,path_info,client_name)
 					path = File.join(dr,path_info)
-					if FileTest.exist?(path) and FileTest.file?(path)
+					puts path					
+					if FileTest.exist?(path) and FileTest.file?(path) and File.expand_path(path).index(dr) == 0 and !(x = static_mask(client_name) and path =~ x)
 						path
 					elsif @suffix_list.has_key?(client_name)
 						path = File.join(dr,@cache_dir[client_name],path_info)
-						if FileTest.exist?(path) and FileTest.file?(path)
+						if FileTest.exist?(path) and FileTest.file?(path) and File.expand_path(path).index(dr) == 0 and !(x = static_mask(client_name) and path =~ x)
 							path
 						else
 							for suffix in @suffix_list[client_name] do
 								p = "#{path}.#{suffix}"
-								return p if FileTest.exist?(p) and FileTest.file?(p)
+								if FileTest.exist?(p) and FileTest.file?(p) and File.expand_path(p).index(dr) == 0 and !(x = static_mask(client_name) and p =~ x)
+									return p
+								end
 							end
 							nil
 						end
