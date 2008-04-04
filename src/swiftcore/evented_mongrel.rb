@@ -19,6 +19,9 @@ require 'mongrel'
 
 module Mongrel
 	class MongrelProtocol < EventMachine::Connection
+		
+		Cblank = ''.freeze
+		
 		def post_init
 			@parser = HttpParser.new
 			@params = HttpParams.new
@@ -34,7 +37,7 @@ module Mongrel
 			if @parser.finished?
 				if @request_len.nil?
 					@request_len = @params[::Mongrel::Const::CONTENT_LENGTH].to_i
-					script_name, path_info, handlers = ::Mongrel::HttpServer::Instance.classifier.resolve(@params[::Mongrel::Const::REQUEST_PATH])
+					script_name, path_info, handlers = ::Mongrel::HttpServer::Instance.classifier.resolve(@params[::Mongrel::Const::REQUEST_PATH] || Cblank)
 					if handlers
 						@params[::Mongrel::Const::PATH_INFO] = path_info
 						@params[::Mongrel::Const::SCRIPT_NAME] = script_name
