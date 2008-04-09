@@ -2,7 +2,7 @@ module Swiftcore
 
 	# A little statemachine for loading requirements.  The intention is to
 	# only load rubygems if necessary, and to load the Deque and SplayTreeMap
-	# classes if they are available and set a constant accordingly so that
+	# classes if they are available, setting a constant accordingly so that
 	# the fallbacks (Array and Hash) can be used if they are not.
 	begin
 		load_state ||= :start
@@ -115,6 +115,7 @@ module Swiftcore
 		Cservers = 'servers'.freeze
 		Cssl = 'ssl'.freeze
 		Csize = 'size'.freeze
+		Cstaticmask = 'staticmask'.freeze
 		Cswiftclient = 'swiftclient'.freeze
 		Cthreshold = 'threshold'.freeze
 		Ctimeslice = 'timeslice'.freeze
@@ -153,7 +154,9 @@ module Swiftcore
 			@dynamic_request_map = {}
 			@etag_cache_map = {}
 			@x_forwarded_for = {}
+			@static_mask = {}
 			@keys = {}
+			@filters = {}
 			@demanding_clients = Hash.new {|h,k| h[k] = Deque.new}
 			#@demanding_clients = Hash.new {|h,k| h[k] = []}
 			@hitcounters = Hash.new {|h,k| h[k] = 0}
@@ -221,19 +224,19 @@ module Swiftcore
 					@incoming_map.delete(name)
 				end
 
-				def add_incoming_docroot(path,name)
-					@docroot_map[name] = path
+				def add_docroot(path,name)
+					@docroot_map[name] = File.expand_path(path)
 				end
 
-				def remove_incoming_docroot(name)
+				def remove_docroot(name)
 					@docroot_map.delete(name)
 				end
 
-				def add_incoming_sendfileroot(path,name)
+				def add_sendfileroot(path,name)
 					@sendfileroot_map[name] = path
 				end
 				
-				def remove_incoming_sendfileroot(name)
+				def remove_sendfileroot(name)
 					@sendfileroot_map.delete(name)
 				end
 				
@@ -241,11 +244,11 @@ module Swiftcore
 					@sendfileroot_map[name]
 				end
 				
-				def add_incoming_redeployable(limit,name)
+				def add_redeployable(limit,name)
 					@redeployable_map[name] = limit
 				end
 
-				def remove_incoming_redeployable(name)
+				def remove_redeployable(name)
 					@redeployable_map.delete(name)
 				end
 				
@@ -292,6 +295,30 @@ module Swiftcore
 				
 				def unset_x_forwarded_for(name)
 					@x_forwarded_for[name] = false
+				end
+								
+				def add_static_mask(regexp, name)
+					@static_mask[name] = regexp
+				end
+				
+				def static_mask(name)
+					@static_mask[name]
+				end
+				
+				def remove_static_mask(name)
+					@static_mask.delete(name)
+				end
+				
+				def add_filter(filter, name)
+					(@filters[name] ||= []) << filter
+				end
+				
+				def filter(name)
+					@filters[name]
+				end
+				
+				def remove_filters(name)
+					@filters[name].clear if @filters[name]
 				end
 				
 				# Sets the default proxy destination, if requests are received
@@ -475,7 +502,7 @@ module Swiftcore
 				
 				def find_static_file(docroot,path_info,client_name)
 					path = File.join(docroot,path_info)
-					FileTest.exist?(path) and FileTest.file?(path) and File.expand_path(path).index(docroot) == 0 ? path : false
+					path if FileTest.exist?(path) and FileTest.file?(path) and File.expand_path(path).index(docroot) == 0 and !(x = static_mask(client_name) and path =~ x) ? path : false
 				end
 				
 				# Pushes a front end client (web browser) into the queue of
@@ -534,7 +561,12 @@ module Swiftcore
 				# serviced.
 
 				def add_server srvr
-					@server_q[srvr.name].unshift(srvr) unless match_server_to_client_now(srvr)
+					if f = srvr.filter
+				 		q[f] = Deque.new unless q = @server_q[srvr.name]
+						q[f].unshift(srvr) unless match_server_to_client_now(srvr)
+					else
+						@server_q[srvr.name].unshift(srvr) unless match_server_to_client_now(srvr)
+					end
 				end
 
 				# Deletes the provided server from the server queue.
@@ -555,6 +587,22 @@ module Swiftcore
 				# server.
 
 				def match_client_to_server_now(client)
+					# To allow filtering to different outgoing locations, by
+					# url, there needs to be some potential logic here.
+					# maybe:
+					hash = @incoming_map[client.name]
+											
+					if outgoing_filters = @filters[hash]
+						outgoing_filters.each do |f|
+							if client.uri =~ f
+								sq = @server_q[@incoming_map[client.name][f]]
+								break
+							end
+						end
+					else
+						sq = @server_q[@incoming_map[client.name]]
+					end
+					
 					sq = @server_q[@incoming_map[client.name]]
 					if sq.empty?
 						false
@@ -642,8 +690,7 @@ module Swiftcore
 		class ClusterProtocol < EventMachine::Connection
 #			include Swiftcore::MicroParser
 
-			attr_accessor :create_time, :associate, :name, :redeployable, :data_pos, :data_len, :peer_ip
-			attr_writer :uri
+			attr_accessor :create_time, :associate, :name, :redeployable, :data_pos, :data_len, :peer_ip, :uri
 
 			Crn = "\r\n".freeze
 			Crnrn = "\r\n\r\n".freeze
@@ -834,6 +881,7 @@ module Swiftcore
 				@headers_completed = @dont_send_data = false
 				#@content_length = nil
 				@content_sent = 0
+				@filter = self.class.filter
 			end
 			
 			# Receive data from the backend process.  Headers are parsed from
@@ -968,6 +1016,18 @@ module Swiftcore
 			
 			def self.enable_sendfile_404
 				@enable_sendfile_404
+			end
+			
+			def self.filter=(val)
+				@filter = val
+			end
+			
+			def self.filter
+				@filter
+			end
+			
+			def filter
+				@filter
 			end
 		end
 
@@ -1189,16 +1249,16 @@ EOC
 						ProxyBag.add_etag_cache(etag_cache,p)
 						
 						if m.has_key?(Cdocroot)
-							ProxyBag.add_incoming_docroot(m[Cdocroot],p)
+							ProxyBag.add_docroot(m[Cdocroot],p)
 						else
-							ProxyBag.remove_incoming_docroot(p)
+							ProxyBag.remove_docroot(p)
 						end
 						
 						if m.has_key?(Csendfileroot)
-							ProxyBag.add_incoming_sendfileroot(m[Csendfileroot],p)
+							ProxyBag.add_sendfileroot(m[Csendfileroot],p)
 							permit_xsendfile = true
 						else
-							ProxyBag.remove_incoming_sendfileroot(p)
+							ProxyBag.remove_sendfileroot(p)
 							permit_xsendfile = false
 						end
 						
@@ -1209,15 +1269,21 @@ EOC
 						end
 						
 						if m[Credeployable]
-							ProxyBag.add_incoming_redeployable(m[Credeployment_sizelimit] || 16384,p)
+							ProxyBag.add_redeployable(m[Credeployment_sizelimit] || 16384,p)
 						else
-							ProxyBag.remove_incoming_redeployable(p)
+							ProxyBag.remove_redeployable(p)
 						end
 						
 						if m.has_key?(Ckey)
 							ProxyBag.set_key(hash,m[Ckey])
 						else
 							ProxyBag.set_key(hash,C_empty)
+						end
+						
+						if m.has_key?(Cstaticmask)
+							ProxyBag.add_static_mask(Regexp.new(m[Cstaticmask]),p)
+						else
+							ProxyBag.remove_static_mask(p)
 						end
 						
 						if m.has_key?(Ccache_extensions) or m.has_key?(Ccache_directory)
@@ -1229,24 +1295,77 @@ EOC
 							ProxyBag.remove_cache_dir(p) if ProxyBag.respond_to?(:remove_cache_dir)
 						end
 							
+						# Go through the outgoing sections, creating an EM server
+						# for each one.
+						
+						# First, make sure the filters are clear.
+						ProxyBag.remove_filters(p)
+						
 						m[Coutgoing].each do |o|
-							ProxyBag.logger.log('info',"  Configuring outgoing #{o}") if log_level > 2
+							#
+							# outgoing: 127.0.0.1:12340
+							# outgoing:
+							#   to: 127.0.0.1:12340
+							#
+							# outgoing:
+							#   match: php$
+							#   to: 127.0.0.1:12342
+							#
+							# outgoing:
+							#   prefix: /blah
+							#   to: 127.0.0.1:12345
+							#
+							#####
+							#
+							# If the outgoing is a simple host:port, then all
+							# requests go striaght to a backend connected to
+							# that socket location.
+							#
+							# If the outgoing is a hash, and the hash only has
+							# a 'to' key, then the behavior is the same as if
+							# it were a simple host:port.
+							#
+							# If the outgoing hash has a 'to' and a 'match',
+							# then the incoming request's uri will be compared
+							# to the regular expression contained in the
+							# 'match' parameter.
+							#
+							# If the outgoing hash has a 'to' and a 'prefix',
+							# then the incoming request's uri will be compared
+							# with the prefix using a trie classifier.
+							#   THE PREFIX OPTION IS NOT FULLY IMPLEMENTED!!!
+
+							if Hash === o
+								out = [o['to'],o['match'],o['prefix']].compact.join('::')
+								host, port = o['to'].split(/:/,2)
+								filter = Regexp.new(o['match'])
+							else
+								out = o
+								host, port = out.split(/:/,2)
+								filter = nil
+							end
+							
+							ProxyBag.logger.log('info',"  Configuring outgoing #{out}") if log_level > 2
 							ProxyBag.default_name = p if m[Cdefault]
-							if @existing_backends.has_key?(o)
-								#ProxyBag.logger.log('info','    Already running; skipping')
-								new_config[Coutgoing][o] ||= RunningConfig[Coutgoing][o]
+							
+							if @existing_backends.has_key?(out)
+								ProxyBag.logger.log('info','    Already running; skipping') if log_level > 2
+								new_config[Coutgoing][out] ||= RunningConfig[Coutgoing][out]
 								next
 							else
-								@existing_backends[o] = true
+								# TODO:  Add ability to create filters for outgoing destinations, so one can send different path patterns to different outgoing hosts/ports.
+								@existing_backends[out] = true
 								backend_class = Class.new(BackendProtocol)
 								backend_class.bname = hash
 								ProxyBag.logger.log('info',"    Permit X-Sendfile") if permit_xsendfile and log_level > 2
 								backend_class.xsendfile = permit_xsendfile
 								ProxyBag.logger.log('info',"    Enable 404 on missing Sendfile resource") if m[Cenable_sendfile_404] and log_level > 2
-								backend_class.enable_sendfile_404 = true if m[Cenable_sendfile_404]
-								host, port = o.split(/:/,2)
+								backend_class.enable_sendfile_404 = true if m[Cenable_sendfile_404]								
+								backend_class.filter = !filter.nil?
+								ProxyBag.add_filter(filter,hash)
+
 								begin
-									new_config[Coutgoing][o] = EventMachine.start_server(host, port.to_i, backend_class)
+									new_config[Coutgoing][out] = EventMachine.start_server(host, port.to_i, backend_class)
 								rescue RuntimeError => e
 									advice = ''
 									if port.to_i < 1024
