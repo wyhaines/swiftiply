@@ -374,8 +374,9 @@ module Swiftcore
 				# again.
 				
 				def verify_cache(cache)
-					log(cache.owner_hash).log('info',"Checking #{cache.class.name} for #{cache.owners}") if level(cache.owner_hash) == 3
+					log(cache.owner_hash).log('info',"Checking #{cache.class.name}(#{cache.vqlength}/#{cache.length}) for #{cache.owners}") if level(cache.owner_hash) == 3
 					new_interval = cache.check_verification_queue
+					log(cache.owner_hash).log('info',"  Next #{cache.class.name} check in #{new_interval} seconds") if level(cache.owner_hash) == 3
 					EventMachine.add_timer(new_interval) do
 						verify_cache(cache)
 					end
@@ -1438,8 +1439,11 @@ EOC
 		end
 		
 		# There are 4 levels of logging supported.
-		#   :disabled means no logging
-		#   :minimal logs only 
+		#   :disabled or 0 means no logging
+		#   :minimal or 1 logs only essential items
+		#   :normal or 2 logs everything useful/interesting
+		#   :full or 3 logs all major events
+		#
 		def self.determine_log_level(lvl)
 			case lvl.to_s
 			when /^d|0/

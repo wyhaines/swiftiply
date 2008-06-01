@@ -28,20 +28,35 @@ module Swiftcore
 			
 			def verify(path_info)
 				if f = self[path_info]
-					if File.exist?(f[3])
-						mt = File.mtime(f[3])
-						if mt == f[2]
-							true
-						else
-							false
-						end
+					if File.exist?(f[3]) and File.mtime(f[3]) == f[2]
+						true
 					else
+						ProxyBag.log(owner_hash).log('info',"Removing file #{path_info} from file cache") if ProxyBag.level(owner_hash) > 2
 						false
 					end
 				else
+					# It was in the verification queue, but not in the file cache.
 					false
 				end
 			end
+
+#			def verify(path_info)
+#				if f = self[path_info]
+#					if File.exist?(f[3])
+#						mt = File.mtime(f[3])
+#						if mt == f[2]
+#							true
+#						else
+#							false
+#						end
+#					else
+#						false
+#					end
+#				else
+#					false
+#				end
+#			end
+			
 		end
 	end
 end

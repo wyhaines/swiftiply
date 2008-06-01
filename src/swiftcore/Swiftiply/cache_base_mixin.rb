@@ -8,16 +8,20 @@ module Swiftcore
 				true
 			end
 			
+			def vqlength
+				@vq.length
+			end
+
 			def check_verification_queue
 				start = Time.now
 				count = 0
-				@push_to_vq = []
+				@push_to_vq = {}
 				while Time.now < start + @tl && !@vq.empty?
 					count += 1
 					path = @vq.pop
-					verify(path) ? @push_to_vq.push(path) : delete(path)
+					verify(path) ? @push_to_vq[path] = 1 : delete(path)
 				end
-				@push_to_vq.each {|x| add_to_verification_queue(x)}
+				@push_to_vq.each_key {|x| add_to_verification_queue(x)}
 				
 				rt = Time.now - start
 				
@@ -30,7 +34,7 @@ module Swiftcore
 					@vw / 2
 				else
 					wait_time = (@vwtl * count) / (l * rt)
-					wait_time < rt ? rt * 2.0 : wait_time
+					wait_time < rt ? rt * 2.0 : wait_time > @vw ? @vw : wait_time
 				end
 			end			
 		end
