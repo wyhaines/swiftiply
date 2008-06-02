@@ -374,9 +374,9 @@ module Swiftcore
 				# again.
 				
 				def verify_cache(cache)
-					log(cache.owner_hash).log('info',"Checking #{cache.class.name}(#{cache.vqlength}/#{cache.length}) for #{cache.owners}") if level(cache.owner_hash) == 3
+					log(cache.owner_hash).log('info',"Checking #{cache.class.name}(#{cache.vqlength}/#{cache.length}) for #{cache.owners}") if level(cache.owner_hash) > 2
 					new_interval = cache.check_verification_queue
-					log(cache.owner_hash).log('info',"  Next #{cache.class.name} check in #{new_interval} seconds") if level(cache.owner_hash) == 3
+					log(cache.owner_hash).log('info',"  Next #{cache.class.name} check in #{new_interval} seconds") if level(cache.owner_hash) > 2
 					EventMachine.add_timer(new_interval) do
 						verify_cache(cache)
 					end
@@ -522,7 +522,12 @@ module Swiftcore
 						# queue. So, go from nil to false, then from false to
 						# insertion into the queue.
 						unless drmval = drm[uri]
-							drm[uri] = drmval == false ? drm.add_to_verification_queue(uri) : false
+							if drmval == false
+								drm[uri] = drm.add_to_verification_queue(uri)
+								log(drm.owner_hash).log('info',"Adding request #{uri} to dynamic request cache") if level(drm.owner_hash) > 2
+							else
+								drm[uri] = false
+							end
 						end
 						
 						# A lot of sites won't need to check X-FORWARDED-FOR, so
