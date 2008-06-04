@@ -533,7 +533,7 @@ module Swiftcore
 						# A lot of sites won't need to check X-FORWARDED-FOR, so
 						# we'll only take the time to munge the headers to add
 						# it if the config calls for it.
-						data.sub(/\r\n\r\n/,"X-FORWARDED-FOR: #{Socket::unpack_sockaddr_in(clnt.get_peername)}\r\n\r\n") if x_forwarded_for(clnt.name)
+						data.sub!(/\r\n\r\n/,"\r\nX-FORWARDED-FOR: #{Socket::unpack_sockaddr_in(clnt.get_peername).last}\r\n\r\n") if x_forwarded_for(clnt.name)
 						
 						data_q.unshift data
 						unless match_client_to_server_now(clnt)
@@ -1183,9 +1183,11 @@ EOC
 						ProxyBag.add_log(new_log[:logger],hash)
 						ProxyBag.set_level(new_log[:log_level],hash)
 					end
-															
+
+					# The File Cache defaults to a max size of 100 elements, with a refresh
+					# window of five minues, and a time slice of a hundredth of a second.
 					sz = 100
-					vw = 900
+					vw = 300
 					ts = 0.01
 					
 					if m.has_key?(Cfile_cache)
@@ -1201,9 +1203,10 @@ EOC
 					file_cache = Swiftcore::Swiftiply::FileCache.new(vw,ts,sz)
 					file_cache.owners = owners
 					file_cache.owner_hash = hash
-
 					EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(file_cache)} unless RunningConfig[:initialized]
 
+					# The Dynamic Request Cache defaults to a max size of 100, with a 15 minute
+					# refresh window, and a time slice of a hundredth of a second.
 					sz = 100
 					vw = 900
 					ts = 0.01
@@ -1221,8 +1224,11 @@ EOC
 					dynamic_request_cache.owner_hash = hash
 					EventMachine.add_timer(vw/2) {ProxyBag.verify_cache(dynamic_request_cache)} unless RunningConfig[:initialized]
 
-					sz = 100
-					vw = 900
+					# The ETag Cache defaults to a max size of 10000 (it doesn't take a lot
+					# of RAM to hold an etag), with a 5 minute refresh window and a time
+					# slice of a hundredth of a second.
+					sz = 10000
+					vw = 300
 					ts = 0.01
 					if m.has_key?(Cetag_cache)
 						sz = m[Cetag_cache][Csize] || 100
