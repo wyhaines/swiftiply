@@ -33,7 +33,8 @@ module Swiftcore
 	#	require 'ruby-prof'
 	rescue LoadError => e
 		unless rubygems_loaded
-			# Ugh.  Everything gets slower once rubygems are used.  So, for the
+			# Everything gets slower once rubygems are used (though this
+			# effect is not so profound as it once was).  So, for the
 			# best speed possible, don't install EventMachine or Swiftiply via
 			# gems.
 			begin
