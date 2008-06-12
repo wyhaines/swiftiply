@@ -30,12 +30,9 @@ class MongrelSwiftStart
   		opts.on('-n','--num-mongrels [NUM]','The number of mongrels to start.') do |numm|
   			config[:num] = numm.to_i
   		end
-  		opts.on('-P','--pidfiles [NUM]','Path to store PID files.') do |numm|
-  			config[:num] = numm.to_i
+  		opts.on('-P','--pidfiles [NUM]','Path to store PID files.') do |pid|
+  			config[:pid] = pid.to_i
   		end
-			opts.on('-e','--environment [ENV]','Set to production or development to change your environment setting.') do |env|
-				config[:env] = env.to_s
-			end
   	end.parse!
   	@config = defaults.update(config)
   end
