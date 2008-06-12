@@ -1,0 +1,26 @@
+# This is a very simple, naive Swiftiply client.  All that is does is echo whatever
+# request it receives as its response, in a very simplistic way.
+
+require 'swiftcore/Swiftiply/swiftiply_client'
+
+class EchoClient < SwiftiplyClientProtocol
+		def post_init
+			@httpdata = ''
+			super
+		end
+			
+        def receive_data data
+        	@httpdata << data
+        	if @httpdata =~ /\r\n\r\n/
+				send_http_data(@httpdata)
+				@httpdata = ''
+			end
+        end
+end
+
+if ARGV[0] and ARGV[0].index(/:/) > 0
+	h,p = ARGV[0].split(/:/,2)
+	EventMachine.run { EchoClient.connect(h,p.to_i,ARGV[1] || '') }
+else
+	puts "echo_client HOST:PORT [KEY]"
+end

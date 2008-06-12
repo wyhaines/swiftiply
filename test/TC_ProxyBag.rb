@@ -120,7 +120,7 @@ ECONF
 	def test_add_incoming_docroot
 		pb = Swiftcore::Swiftiply::ProxyBag
 		assert_nothing_raised do
-			pb.add_incoming_docroot('/abc/123',:abcdef)
+			pb.add_docroot('/abc/123',:abcdef)
 		end
 		assert_equal('/abc/123',pb.instance_variable_get('@docroot_map')[:abcdef])		
 	end
@@ -128,7 +128,7 @@ ECONF
 	def test_remove_incoming_docroot
 		pb = Swiftcore::Swiftiply::ProxyBag
 		assert_nothing_raised do
-			pb.remove_incoming_docroot(:abcdef)
+			pb.remove_docroot(:abcdef)
 		end
 		assert_nil(pb.instance_variable_get('@docroot_map')[:abcdef])
 	end
@@ -136,7 +136,7 @@ ECONF
 	def test_add_incoming_redeployable
 		pb = Swiftcore::Swiftiply::ProxyBag
 		assert_nothing_raised do
-			pb.add_incoming_redeployable(16384,:abcdef)
+			pb.add_redeployable(16384,:abcdef)
 		end
 		assert_equal(16384,pb.instance_variable_get('@redeployable_map')[:abcdef])		
 	end
@@ -144,7 +144,7 @@ ECONF
 	def test_remove_incoming_redeployable
 		pb = Swiftcore::Swiftiply::ProxyBag
 		assert_nothing_raised do
-			pb.remove_incoming_redeployable(:abcdef)
+			pb.remove_redeployable(:abcdef)
 		end
 		assert_nil(pb.instance_variable_get('@redeployable_map')[:abcdef])
 	end
@@ -178,7 +178,7 @@ ECONF
 		path_info = "testfile#{Time.now.to_i}"
 		File.open(path_info,'w') {|fh| fh.puts "alfalfa leafcutter bee"}
 		assert_equal(File.join(dr,path_info),Swiftcore::Swiftiply::ProxyBag.find_static_file(dr,path_info,'foo'))
-		assert_equal(false,Swiftcore::Swiftiply::ProxyBag.find_static_file(dr,'xyzzy','foo'))
+		assert_equal(nil,Swiftcore::Swiftiply::ProxyBag.find_static_file(dr,'xyzzy','foo'))
 		File.delete(path_info)
 	end
 	
