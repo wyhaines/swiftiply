@@ -347,6 +347,29 @@ ECONF
 		dc = File.join(Dir.pwd,'TC_Swiftiply')
 		dr = File.join(dc,'test_ssl')
 		
+		# Before proceding with testing, the code here should determine if the
+		# EventMachine installed on the system has SSL support built.  If it
+		# does not, don't run the tests.  Instead, report on this fact and
+		# point them at some information about how to reinstall EM so that it
+		# does support ssl.
+		
+		puts "Testing whether SSL is available..."
+		ssl_available = system("#{Ruby} TC_Swiftiply/test_ssl/bin/validate_ssl_capability.rb")
+		
+		if ssl_available
+			puts "  SSL is available.  Continuing."
+		else
+			puts "\n\n\n!!! Notice !!!"
+			puts "\nSSL does not appear to be available in your version of EventMachine."
+			puts "This is probably because it could not find the openssl libraries while compiling."
+			puts "If you do not have these libraries, install them, then rebuild/reinstall"
+			puts "EventMachine.  If you do have them, you should report this as a bug to the"
+			puts "EventMachine project, with details about your system, library locations, etc...,"
+			puts "so that they can fix the build process."
+			puts "\nSkipping SSL tests."
+			return
+		end
+		
 		smallfile_name = "smallfile#{Time.now.to_i}"
 		smallfile_path = File.join(dr,'pub',smallfile_name)
 		File.open(smallfile_path,'w') {|fh| fh.puts "alfalfa leafcutter bee"}

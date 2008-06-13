@@ -11,7 +11,7 @@ spec = Gem::Specification.new do |s|
   s.name              = 'swiftiply'
   s.author            = %q(Kirk Haines)
   s.email             = %q(wyhaines@gmail.com)
-  s.version           = '0.6.1'
+  s.version           = '0.6.3'
   s.summary           = %q(A fast clustering proxy for web applications.)
   s.platform          = Gem::Platform::RUBY
 
@@ -20,7 +20,7 @@ spec = Gem::Specification.new do |s|
   s.extra_rdoc_files  = %w(README)
   s.extensions        << 'ext/fastfilereader/extconf.rb'
   s.files             = Dir['**/*']
-	s.executables = %w(swiftiply mongrel_rails swiftiply_mongrel_rails)
+	s.executables = %w(swiftiply swiftiplied_mongrel_rails swiftiply_mongrel_rails)
 	s.require_paths = %w(src)
 
 	s.requirements      << "Eventmachine 0.8.1 or higher."
