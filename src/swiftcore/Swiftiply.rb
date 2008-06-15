@@ -102,6 +102,7 @@ module Swiftcore
 		CHEAD = 'HEAD'.freeze
 		Chost = 'host'.freeze
 		Cincoming = 'incoming'.freeze
+		Cinfo = 'info'.freeze
 		Ckeepalive = 'keepalive'.freeze
 		Ckey = 'key'.freeze
 		Ckeyfile = 'keyfile'.freeze
@@ -375,9 +376,9 @@ module Swiftcore
 				# again.
 				
 				def verify_cache(cache)
-					log(cache.owner_hash).log('info',"Checking #{cache.class.name}(#{cache.vqlength}/#{cache.length}) for #{cache.owners}") if level(cache.owner_hash) > 2
+					log(cache.owner_hash).log(Cinfo,"Checking #{cache.class.name}(#{cache.vqlength}/#{cache.length}) for #{cache.owners}") if level(cache.owner_hash) > 2
 					new_interval = cache.check_verification_queue
-					log(cache.owner_hash).log('info',"  Next #{cache.class.name} check in #{new_interval} seconds") if level(cache.owner_hash) > 2
+					log(cache.owner_hash).log(Cinfo,"  Next #{cache.class.name} check in #{new_interval} seconds") if level(cache.owner_hash) > 2
 					EventMachine.add_timer(new_interval) do
 						verify_cache(cache)
 					end
@@ -408,26 +409,26 @@ module Swiftcore
 						if data = fc[path_info]
 							none_match = clnt.none_match
 							same_response = case
-								when request_method == CHEAD : false
-								when none_match && none_match == C_asterisk : false
-								when none_match && !none_match.strip.split(/\s*,\s*/).include?(data[1]) : false
+								when request_method == CHEAD then false
+								when none_match && none_match == C_asterisk then false
+								when none_match && !none_match.strip.split(/\s*,\s*/).include?(data[1]) then false
 								else none_match
 								end	
 							if same_response
 								clnt.send_data C_304
 								oh = fc.owner_hash
-								log(oh).log('info',"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
+								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
 								#clnt.send_data data.last
 								#clnt.send_data data.first unless request_method == CHEAD
 								unless request_method == CHEAD
 									clnt.send_data data.last + data.first
 									oh = fc.owner_hash
-									log(oh).log('info',"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 200 #{data.first.length}") if level(oh) > 1
+									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 200 #{data.first.length}") if level(oh) > 1
 								else
 									clnt.send_data data.last
 									oh = fc.owner_hash
-									log(oh).log('info',"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"HEAD #{path_info} HTTP/#{clnt.http_version}\" 200 -") if level(oh) > 1
+									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"HEAD #{path_info} HTTP/#{clnt.http_version}\" 200 -") if level(oh) > 1
 								end
 							end
 							clnt.close_connection_after_writing
@@ -437,9 +438,9 @@ module Swiftcore
 							etag,mtime = @etag_cache_map[client_name].etag_mtime(path)
 							same_response = nil
 							same_response = case
-								when request_method == CHEAD : false
-								when none_match && none_match == C_asterisk : false
-								when none_match && !none_match.strip.split(/\s*,\s*/).include?(etag) : false
+								when request_method == CHEAD then false
+								when none_match && none_match == C_asterisk then false
+								when none_match && !none_match.strip.split(/\s*,\s*/).include?(etag) then false
 								else none_match
 							end
 	
@@ -447,7 +448,7 @@ module Swiftcore
 								clnt.send_data C_304
 								clnt.close_connection_after_writing
 								oh = fc.owner_hash
-								log(oh).log('info',"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
+								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
 								ct = @typer.simple_type_for(path) || Caos
 								fsize = File.size(path)
@@ -478,7 +479,7 @@ module Swiftcore
 								fc.add(path_info, path, fd || File.read(path),etag,mtime,header_line) if fsize < @cache_threshold
 								
 								oh = fc.owner_hash
-								log(oh).log('info',"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"#{request_method} #{path_info} HTTP/#{clnt.http_version}\" 200 #{request_method == CHEAD ? C_empty : fsize}") if level(oh) > 1
+								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"#{request_method} #{path_info} HTTP/#{clnt.http_version}\" 200 #{request_method == CHEAD ? C_empty : fsize}") if level(oh) > 1
 							end
 							true
 						end
@@ -513,6 +514,9 @@ module Swiftcore
 
 				def add_frontend_client(clnt,data_q,data)
 					clnt.create_time = @ctime
+					
+					# Initialize parameters relevant to redeployable requests, if this client
+					# has them enabled.
 					clnt.data_pos = clnt.data_len = 0 if clnt.redeployable = @redeployable_map[clnt.name]
 
 					uri = clnt.uri
@@ -525,7 +529,7 @@ module Swiftcore
 						unless drmval = drm[uri]
 							if drmval == false
 								drm[uri] = drm.add_to_verification_queue(uri)
-								log(drm.owner_hash).log('info',"Adding request #{uri} to dynamic request cache") if level(drm.owner_hash) > 2
+								log(drm.owner_hash).log(Cinfo,"Adding request #{uri} to dynamic request cache") if level(drm.owner_hash) > 2
 							else
 								drm[uri] = false
 							end
@@ -538,8 +542,8 @@ module Swiftcore
 						
 						data_q.unshift data
 						unless match_client_to_server_now(clnt)
-							#if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
-							if $&
+							if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
+							#if $&
 								@demanding_clients[$1].unshift clnt
 							else
 								@client_q[@incoming_map[name]].unshift(clnt)
@@ -554,8 +558,8 @@ module Swiftcore
 					clnt.data_pos = clnt.data_len = 0
 					
 					unless match_client_to_server_now(clnt)
-						#if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
-						if $&
+						if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
+						#if $& ####
 							@demanding_clients[$1].unshift clnt
 						else
 							@client_q[@incoming_map[clnt.name]].unshift(clnt)
@@ -598,7 +602,7 @@ module Swiftcore
 					# url, there needs to be some potential logic here.
 					# maybe:
 					hash = @incoming_map[client.name]
-											
+					
 					if outgoing_filters = @filters[hash]
 						outgoing_filters.each do |f|
 							if client.uri =~ f
@@ -606,11 +610,9 @@ module Swiftcore
 								break
 							end
 						end
-					else
-						sq = @server_q[@incoming_map[client.name]]
 					end
 					
-					sq = @server_q[@incoming_map[client.name]]
+					sq ||= @server_q[@incoming_map[client.name]]
 					if sq.empty?
 						false
 					elsif client.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
@@ -702,6 +704,7 @@ module Swiftcore
 			Crn = "\r\n".freeze
 			Crnrn = "\r\n\r\n".freeze
 			C_blank = ''.freeze
+			C_percent = '%'.freeze
 			C503Header = "HTTP/1.0 503 Server Unavailable\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
 
 			# Initialize the @data array, which is the temporary storage for blocks
@@ -732,7 +735,7 @@ module Swiftcore
 						@uri = $2 || C_blank
 						@http_version = $3
 						@request_method = $1
-						@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete('%')].pack('H*')} if @uri =~ /%/
+						@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete(C_percent)].pack('H*')} if @uri.include?(C_percent)
 					end
 					unless @name
 						if data =~ /^Host:\s*([^\r\0:]+)/
@@ -744,8 +747,9 @@ module Swiftcore
 						d = @data.join
 					else
 						d = data
+						@hmp = true
 					end
-					if d =~ /\r\n\r\n/
+					if d.include?(Crnrn)
 						@name ||= ProxyBag.default_name
 						@done_parsing = true
 						if data =~ /^If-None-Match:\s*([^\r]+)/
@@ -918,11 +922,16 @@ module Swiftcore
 				end
 				
 				unless @headers_completed 
-					if data =~ /\r\n\r\n/
+					if data.include?(Crnrn)
 						@headers_completed = true
 						h,data = data.split(/\r\n\r\n/,2)
 						#@headers << h << Crnrn
-						@headers << h
+						if @headers.length > 0
+							@headers << h
+						else
+							@headers = h
+						end
+						
 						if @headers =~ /Content-[Ll]ength:\s*([^\r]+)/
 							@content_length = $1.to_i
 						elsif @headers =~ /Transfer-encoding:\s*chunked/
