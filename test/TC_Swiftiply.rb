@@ -353,7 +353,26 @@ ECONF
 		# point them at some information about how to reinstall EM so that it
 		# does support ssl.
 		
-		puts "Testing whether SSL is available..."
+		print "Testing whether SSL is available..."
+		Thread.new do
+			sleep 1
+			print '..'
+			STDOUT.flush
+			sleep 1
+			print '..'
+			STDOUT.flush
+			sleep 1
+			print '..'
+			STDOUT.flush
+			sleep 1
+			print '..'
+			STDOUT.flush
+			http = Net::HTTP.new('127.0.0.1',3333)
+			http.use_ssl
+			http.start {http.request_get('/')}
+			puts '..'
+		end
+		
 		ssl_available = system("#{Ruby} TC_Swiftiply/test_ssl/bin/validate_ssl_capability.rb")
 		
 		if ssl_available
