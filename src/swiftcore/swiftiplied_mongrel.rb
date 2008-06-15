@@ -123,7 +123,7 @@ module Mongrel
 			@acceptor = Thread.new do
 				EventMachine.run do
 					begin
-						MongrelProtocol.connect(@host,@port,@key)
+						MongrelProtocol.connect(@host,@port.to_i,@key)
 					rescue StopServer
 						EventMachine.stop_event_loop
 					end
