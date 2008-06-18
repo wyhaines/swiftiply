@@ -145,13 +145,38 @@ static VALUE deque_to_s (VALUE self)
 	if (!dq)
 		rb_raise (rb_eException, "No Deque Object");
 
+/*
+	for ( q_iterator = (*dq).begin(); q_iterator != (*dq).end(); q_iterator++ ) {
+		rb_funcall(s,concat,1,rb_funcall(*q_iterator,to_s,0));
+	} 
+*/
+
+	for ( q_iterator = (*dq).begin(); q_iterator != (*dq).end(); q_iterator++ ) {
+		s = rb_str_concat(s,rb_funcall(*q_iterator, to_s, 0));
+	}
+	return rb_str_to_str(s);
+}
+
+/*
+static VALUE deque_join (VALUE self, VALUE delimiter)
+{
+	VALUE s = rb_str_new2("");
+	ID to_s = rb_intern("to_s");
+	ID concat = rb_intern("concat");
+
+	deque<VALUE>* dq = NULL;
+	deque<VALUE>::iterator q_iterator;
+	Data_Get_Struct(self, deque<VALUE>, dq);
+	if (!dq)
+		rb_raise (rb_eException, "No Deque Object");
+
 	for ( q_iterator = (*dq).begin(); q_iterator != (*dq).end(); q_iterator++ ) {
 		rb_funcall(s,concat,1,rb_funcall(*q_iterator,to_s,0));
 	} 
 
 	return rb_str_to_str(s);
 }
-	
+*/
 static VALUE deque_to_a (VALUE self)
 {
 	VALUE ary = rb_ary_new();
@@ -164,7 +189,8 @@ static VALUE deque_to_a (VALUE self)
 		rb_raise (rb_eException, "No Deque Object");
 
 	for ( q_iterator = (*dq).begin(); q_iterator != (*dq).end(); q_iterator++ ) {
-		rb_funcall(ary,push,1,*q_iterator);
+		//rb_funcall(ary,push,1,*q_iterator);
+		rb_ary_push(ary,*q_iterator);
 	}
 
 	return ary;
@@ -187,11 +213,14 @@ static VALUE deque_inspect (VALUE self)
 	last_q_iterator = (*dq).end();
 
 	for ( q_iterator = (*dq).begin(); q_iterator != last_q_iterator; q_iterator++ ) {
-		rb_funcall(s,concat,1,rb_funcall(*q_iterator,inspect,0));
+//		rb_funcall(s,concat,1,rb_funcall(*q_iterator,inspect,0));
+		rb_str_concat(s,rb_funcall(*q_iterator,inspect,0));
 		if (q_iterator != (last_q_iterator - 1))
-			rb_funcall(s,concat,1,comma);
+//			rb_funcall(s,concat,1,comma);
+			rb_str_concat(s,comma);
 	}
-	rb_funcall(s,concat,1,rb_str_new2("]"));
+//	rb_funcall(s,concat,1,rb_str_new2("]"));
+	rb_str_concat(s,rb_str_new2("]"));
 
 	return rb_str_to_str(s);
 }

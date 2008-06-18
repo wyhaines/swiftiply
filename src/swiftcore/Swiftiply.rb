@@ -744,7 +744,8 @@ module Swiftcore
 						end
 					end
 					if @hmp
-						d = @data.join
+						# Hopefully this doesn't happen often.
+						d = @data.to_s
 					else
 						d = data
 						@hmp = true
