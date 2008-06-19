@@ -72,7 +72,7 @@ module Swiftcore
 		C_slashindex_html = '/index.html'.freeze
 		C1_0 = '1.0'.freeze
 		C1_1 = '1.1'.freeze
-		C_304 = "HTTP/1.1 304 Not Modified\r\n\r\n".freeze
+		C_304 = "HTTP/1.1 304 Not Modified\r\n".freeze
 		Caos = 'application/octet-stream'.freeze
 		Cat = 'at'.freeze
 		Ccache_directory = 'cache_directory'.freeze
@@ -144,6 +144,7 @@ module Swiftcore
 			#@server_q = Hash.new {|h,k| h[k] = []}
 			@logger = nil
 			@ctime = Time.now
+			@dateheader = "Date: #{@ctime.httpdate}\r\n\r\n"
 			@server_unavailable_timeout = 6
 			@id_map = {}
 			@reverse_id_map = {}
@@ -415,18 +416,18 @@ module Swiftcore
 								else none_match
 								end	
 							if same_response
-								clnt.send_data C_304
+								clnt.send_data C_304 + @dateheader
 								oh = fc.owner_hash
 								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
 								#clnt.send_data data.last
 								#clnt.send_data data.first unless request_method == CHEAD
 								unless request_method == CHEAD
-									clnt.send_data data.last + data.first
+									clnt.send_data "#{data.last}#{@dateheader}#{data.first}""
 									oh = fc.owner_hash
 									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 200 #{data.first.length}") if level(oh) > 1
 								else
-									clnt.send_data data.last
+									clnt.send_data data.last + @dateheader
 									oh = fc.owner_hash
 									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"HEAD #{path_info} HTTP/#{clnt.http_version}\" 200 -") if level(oh) > 1
 								end
@@ -445,7 +446,7 @@ module Swiftcore
 							end
 	
 							if same_response
-								clnt.send_data C_304
+								clnt.send_data C_304 + @dateheader
 								clnt.close_connection_after_writing
 								oh = fc.owner_hash
 								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
@@ -453,12 +454,12 @@ module Swiftcore
 								ct = @typer.simple_type_for(path) || Caos
 								fsize = File.size(path)
 
-								header_line = "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
+								header_line = "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n"
 
 								fd = nil
 								if fsize < @chunked_encoding_threshold
 									File.open(path) {|fh| fd = fh.sysread(fsize)}
-									clnt.send_data header_line
+									clnt.send_data header_line + @dateheader
 									unless request_method == CHEAD
 										if fsize < 32768
 											clnt.send_file_data path
@@ -468,11 +469,11 @@ module Swiftcore
 									end
 									clnt.close_connection_after_writing
 								elsif clnt.http_version != C1_0 && fsize > @chunked_encoding_threshold
-									clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n\r\n"
+									clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n#{@dateheader}"
 									EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing} unless request_method == CHEAD
 								else
 									#clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
-									clnt.send_data header_line
+									clnt.send_data header_line + @dateheader
 									EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>false)) {clnt.close_connection_after_writing} unless request_method == CHEAD
 								end
 								
@@ -684,6 +685,7 @@ module Swiftcore
 
 				def update_ctime
 					@ctime = Time.now
+					@dateheader = "Date: #{@ctime.httpdate}\r\n\r\n"
 				end
 
 				def dcnt
@@ -706,6 +708,7 @@ module Swiftcore
 			C_blank = ''.freeze
 			C_percent = '%'.freeze
 			C503Header = "HTTP/1.0 503 Server Unavailable\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
+			C404Header = "HTTP/1.0 503 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
 
 			# Initialize the @data array, which is the temporary storage for blocks
 			# of data received from the web browser client, then invoke the superclass
@@ -757,7 +760,11 @@ module Swiftcore
 							@none_match = $1
 						end
 
-						ProxyBag.add_frontend_client(self,@data,data)
+						if @name
+							ProxyBag.add_frontend_client(self,@data,data)
+						else
+							send_404_response
+						end						
 					else
 						@data.unshift data
 					end
@@ -800,6 +807,14 @@ module Swiftcore
 				end
 			end
 
+			# Hardcoded 503 response that is sent if a connection is timed out while
+			# waiting for a backend to handle it.
+
+			def send_404_response
+				send_data "#{C404Header}Resource not found.\n\nThe request (#{@uri} --> #{@name}), received on #{create_time.asctime} did not match any resource know to this server."
+				close_connection_after_writing
+			end
+	
 			# Hardcoded 503 response that is sent if a connection is timed out while
 			# waiting for a backend to handle it.
 
