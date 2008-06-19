@@ -57,14 +57,23 @@ ECONF
 	def test_update_ctime
 		pb = Swiftcore::Swiftiply::ProxyBag
 		t = pb.update_ctime
-		assert_instance_of(Time,t)
+		assert_instance_of(String,t)
+		pt = nil
+		assert_nothing_raised do
+			pt = Time.parse(t)
+		end
+		assert_instance_of(Time,pt)
+		if Time === pt
+			delta = Time.now - pt
+			assert(delta < 2)
+		end
 	end
 	
 	def test_now
 		pb = Swiftcore::Swiftiply::ProxyBag
 		n = pb.update_ctime
 		assert_instance_of(Time,pb.now)
-		assert_equal(n,pb.now)
+		assert_equal(Time.parse(n).asctime,pb.now.asctime)
 	end
 	
 	def test_set_key
