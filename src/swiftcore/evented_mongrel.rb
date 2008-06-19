@@ -111,6 +111,9 @@ module Mongrel
 			trap('INT') { raise StopServer }
 			trap('TERM') { raise StopServer }
 			@acceptor = Thread.new do
+				# SHOULD NOT DO THIS AUTOMATICALLY.
+				# There either needs to be a way to configure this, or to detect
+				# when it is safe or when kqueue needs to run.
 				EventMachine.epoll
 				EventMachine.set_descriptor_table_size(4096)
 				EventMachine.run do
