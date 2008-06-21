@@ -416,18 +416,18 @@ module Swiftcore
 								else none_match
 								end	
 							if same_response
-								clnt.send_data C_304 + @dateheader
+								clnt.send_data(C_304 + @dateheader)
 								oh = fc.owner_hash
 								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
 								#clnt.send_data data.last
 								#clnt.send_data data.first unless request_method == CHEAD
 								unless request_method == CHEAD
-									clnt.send_data "#{data.last}#{@dateheader}#{data.first}""
+									clnt.send_data "#{data.last}#{@dateheader}#{data.first}"
 									oh = fc.owner_hash
 									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 200 #{data.first.length}") if level(oh) > 1
 								else
-									clnt.send_data data.last + @dateheader
+									clnt.send_data(data.last + @dateheader)
 									oh = fc.owner_hash
 									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"HEAD #{path_info} HTTP/#{clnt.http_version}\" 200 -") if level(oh) > 1
 								end
@@ -446,7 +446,7 @@ module Swiftcore
 							end
 	
 							if same_response
-								clnt.send_data C_304 + @dateheader
+								clnt.send_data(C_304 + @dateheader)
 								clnt.close_connection_after_writing
 								oh = fc.owner_hash
 								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
@@ -459,7 +459,7 @@ module Swiftcore
 								fd = nil
 								if fsize < @chunked_encoding_threshold
 									File.open(path) {|fh| fd = fh.sysread(fsize)}
-									clnt.send_data header_line + @dateheader
+									clnt.send_data(header_line + @dateheader)
 									unless request_method == CHEAD
 										if fsize < 32768
 											clnt.send_file_data path
@@ -489,7 +489,6 @@ module Swiftcore
 					end
 					# The exception is going to be eaten here, because some
 					# dumb file IO error shouldn't take Swiftiply down.
-					# TODO: It should log these errors, though.
 				rescue Object => e
 					puts e
 					@logger.log('error',"Failed request for #{dr.inspect}/#{path.inspect} -- #{e} @ #{e.backtrace.inspect}") if @log_level > 0
@@ -665,16 +664,13 @@ module Swiftcore
 
 				def expire_clients
 					now = Time.now
-
-					@server_q.each_key do |name|
-						unless @server_q[name].first
-							while c = @client_q[name].pop
-								if (now - c.create_time) >= @server_unavailable_timeout
-									c.send_503_response
-								else
-									@client_q[name].push c
-									break
-								end
+					@client_q.each_key do |name|
+						while c = @client_q[name].pop
+							if (now - c.create_time) >= @server_unavailable_timeout
+								c.send_503_response
+							else
+								@client_q[name].push c
+								break
 							end
 						end
 					end
@@ -708,7 +704,7 @@ module Swiftcore
 			C_blank = ''.freeze
 			C_percent = '%'.freeze
 			C503Header = "HTTP/1.0 503 Server Unavailable\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
-			C404Header = "HTTP/1.0 503 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
+			C404Header = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
 
 			# Initialize the @data array, which is the temporary storage for blocks
 			# of data received from the web browser client, then invoke the superclass
@@ -734,10 +730,11 @@ module Swiftcore
 					push
 				else
 					unless @uri
-						data =~ /^(\w+)\s+([^\s\?]+).*(1.\d)/
-						@uri = $2 || C_blank
-						@http_version = $3
+						data =~ /^(\w+)\s+(\w+:\/\/([^\/]+))?([^\s\?]+).*(\d.\d)/
 						@request_method = $1
+						@name = $3.intern if $3
+						@uri = $4 || C_blank
+						@http_version = $5
 						@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete(C_percent)].pack('H*')} if @uri.include?(C_percent)
 					end
 					unless @name
@@ -811,7 +808,7 @@ module Swiftcore
 			# waiting for a backend to handle it.
 
 			def send_404_response
-				send_data "#{C404Header}Resource not found.\n\nThe request (#{@uri} --> #{@name}), received on #{create_time.asctime} did not match any resource know to this server."
+				send_data "#{C404Header}Resource not found.\n\nThe request (#{@uri} --> #{@name}), received on #{ProxyBag.now.asctime} did not match any resource know to this server."
 				close_connection_after_writing
 			end
 	
