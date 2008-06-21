@@ -23,7 +23,7 @@ descriptors: 20000
 defaults:
   logger:
     type: stderror
-    log_level: 1
+    log_level: 0
 map:
   - incoming:
     - 127.0.0.1
@@ -646,7 +646,57 @@ ECONF
 		response = get_url('127.0.0.1',29998,'/xyzzy')
 		assert_equal("GET /xyzzy HTTP/1.1\r\nAccept: */*\r\nHost: 127.0.0.1:29998\r\n\r\n",response.body)
 	end
-	
+
+	def test_http_404_error
+		puts "\nTesting Request for Unknown Host, No Default (404 Error situation)"
+		dc = File.join(Dir.pwd,'TC_Swiftiply')
+		dr = dc
+		
+		conf_file = File.join(dc,'test_404_error.conf')
+		File.open(conf_file,'w+') do |fh|
+			conf = YAML.load(ConfBase.to_yaml)
+			conf['map'].first['default'] = false
+			conf['map'].first['incoming'] = ["localhost"]
+			fh.write conf.to_yaml
+		end
+		
+		DeleteQueue << conf_file
+		
+		assert_nothing_raised("setup failed") do
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src ../../bin/swiftiply -c test_404_error.conf"])
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src ../bin/echo_client 127.0.0.1:29999 abcdef1234"])
+			sleep 1
+		end
+		
+		response = get_url('127.0.0.1',29998,'/xyzzy')
+		assert_equal("404",response.header.code)
+	end
+
+	def test_http_503_error
+		puts "\nTesting Request when server unavailable (503 error situation)"
+		dc = File.join(Dir.pwd,'TC_Swiftiply')
+		dr = dc
+		
+		conf_file = File.join(dc,'test_404_error.conf')
+		File.open(conf_file,'w+') do |fh|
+			conf = YAML.load(ConfBase.to_yaml)
+			fh.write conf.to_yaml
+		end
+		
+		DeleteQueue << conf_file
+		
+		assert_nothing_raised("setup failed") do
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src ../../bin/swiftiply -c test_404_error.conf"])
+			sleep 1
+		end
+		
+		response = get_url('127.0.0.1',29998,'/xyzzy')
+		assert_equal("503",response.header.code)
+	end
+
 	def test_sensible_error1
 		puts "\n---------------------------------------------------------------"
 		puts "|                Raising an error; this is OK!                |"
