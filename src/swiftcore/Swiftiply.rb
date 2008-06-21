@@ -695,6 +695,9 @@ module Swiftcore
 		# to communicate between Swiftiply and the web browser clients.
 
 		class ClusterProtocol < EventMachine::Connection
+			# TODO: Support HTTP Keep-Alive connections.  This should massively
+			# improve the performance on static files.
+			
 #			include Swiftcore::MicroParser
 
 			attr_accessor :create_time, :associate, :name, :redeployable, :data_pos, :data_len, :peer_ip, :uri
@@ -705,6 +708,7 @@ module Swiftcore
 			C_percent = '%'.freeze
 			C503Header = "HTTP/1.0 503 Server Unavailable\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
 			C404Header = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
+			C400Header = "HTTP/1.0 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
 
 			# Initialize the @data array, which is the temporary storage for blocks
 			# of data received from the web browser client, then invoke the superclass
@@ -730,12 +734,39 @@ module Swiftcore
 					push
 				else
 					unless @uri
-						data =~ /^(\w+)\s+(\w+:\/\/([^\/]+))?([^\s\?]+).*(\d.\d)/
-						@request_method = $1
-						@name = $3.intern if $3
-						@uri = $4 || C_blank
-						@http_version = $5
-						@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete(C_percent)].pack('H*')} if @uri.include?(C_percent)
+						# It's amazing how, when writing the code, the brain can be in a zone
+						# where line noise like this regexp makes perfect sense, and is clear
+						# as day; one looks at it and it reads like a sentence.  Then, one
+						# comes back to it later, and looks at it when the brain is in a
+						# different zone, and 'lo!  It looks like line noise again.
+						# In case it looks like line noise to you, dear reader, too:
+						# 1) Match and save the first set of word characters.
+						#    Followed by one or more spaces.
+						# 2) Match and save word characters followed by ://
+						#    3) Match and save one or more characters that are not a slash
+						#    And allow this to match 1 or 0 times.
+						# 4) Match and save one or more characters that are not a question mark or whitespace.
+						#    Match stuff.
+						# 5) Match and save a digit dot digit.
+						#
+						# Thus, this pattern will match both the standard:
+						#   GET /bar HTTP/1.1
+						# style request, as well as the valid (for a proxy) but less common:
+						#   GET http://foo/bar HTTP/1.0
+						#
+						# If the match fails, then this is a bad request, and an appropriate
+						# response will be returned.
+						#
+						if data =~ /^(\w+)\s+(\w+:\/\/([^\/]+))?([^\s\?]+).*(\d\.\d)/
+							@request_method = $1
+							@name = $3.intern if $3
+							@uri = $4 || C_blank
+							@http_version = $5
+							@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete(C_percent)].pack('H*')} if @uri.include?(C_percent)
+						else
+							send_400_response
+							return
+						end
 					end
 					unless @name
 						if data =~ /^Host:\s*([^\r\0:]+)/
@@ -803,9 +834,16 @@ module Swiftcore
 #					end
 				end
 			end
+			
+			# Hardcoded 400 response that is sent if the request is malformed.
 
-			# Hardcoded 503 response that is sent if a connection is timed out while
-			# waiting for a backend to handle it.
+			def send_400_response
+				send_data "#{C400Header}Bad Request\n\nThe request received on #{ProxyBag.now.asctime} was malformed and could not be serviced."
+				close_connection_after_writing
+			end
+
+			# Hardcoded 404 response.  This is sent if a request can't be matched to
+			# any defined incoming section.
 
 			def send_404_response
 				send_data "#{C404Header}Resource not found.\n\nThe request (#{@uri} --> #{@name}), received on #{ProxyBag.now.asctime} did not match any resource know to this server."
