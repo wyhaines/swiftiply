@@ -128,6 +128,8 @@ module Swiftcore
 
 		C_fsep = File::SEPARATOR
 		
+		UnknownSocket = Socket::pack_sockaddr_in(0,'0.0.0.0')
+		
 		RunningConfig = {}
 
 		class EMStartServerError < RuntimeError; end
@@ -418,18 +420,18 @@ module Swiftcore
 							if same_response
 								clnt.send_data(C_304 + @dateheader)
 								oh = fc.owner_hash
-								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
+								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
 								#clnt.send_data data.last
 								#clnt.send_data data.first unless request_method == CHEAD
 								unless request_method == CHEAD
 									clnt.send_data "#{data.last}#{@dateheader}#{data.first}"
 									oh = fc.owner_hash
-									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 200 #{data.first.length}") if level(oh) > 1
+									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 200 #{data.first.length}") if level(oh) > 1
 								else
 									clnt.send_data(data.last + @dateheader)
 									oh = fc.owner_hash
-									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"HEAD #{path_info} HTTP/#{clnt.http_version}\" 200 -") if level(oh) > 1
+									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"HEAD #{path_info} HTTP/#{clnt.http_version}\" 200 -") if level(oh) > 1
 								end
 							end
 							clnt.close_connection_after_writing
@@ -449,7 +451,7 @@ module Swiftcore
 								clnt.send_data(C_304 + @dateheader)
 								clnt.close_connection_after_writing
 								oh = fc.owner_hash
-								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
+								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
 								ct = @typer.simple_type_for(path) || Caos
 								fsize = File.size(path)
@@ -480,7 +482,7 @@ module Swiftcore
 								fc.add(path_info, path, fd || File.read(path),etag,mtime,header_line) if fsize < @cache_threshold
 								
 								oh = fc.owner_hash
-								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername).last} \"#{request_method} #{path_info} HTTP/#{clnt.http_version}\" 200 #{request_method == CHEAD ? C_empty : fsize}") if level(oh) > 1
+								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"#{request_method} #{path_info} HTTP/#{clnt.http_version}\" 200 #{request_method == CHEAD ? C_empty : fsize}") if level(oh) > 1
 							end
 							true
 						end
@@ -706,6 +708,7 @@ module Swiftcore
 			Crnrn = "\r\n\r\n".freeze
 			C_blank = ''.freeze
 			C_percent = '%'.freeze
+			Cunknown_host = 'unknown host'.freeze
 			C503Header = "HTTP/1.0 503 Server Unavailable\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
 			C404Header = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
 			C400Header = "HTTP/1.0 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
@@ -771,7 +774,6 @@ module Swiftcore
 					unless @name
 						if data =~ /^Host:\s*([^\r\0:]+)/
 							@name = $1.intern
-							@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
 						end
 					end
 					if @hmp
@@ -782,7 +784,7 @@ module Swiftcore
 						@hmp = true
 					end
 					if d.include?(Crnrn)
-						@name ||= ProxyBag.default_name
+						@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
 						@done_parsing = true
 						if data =~ /^If-None-Match:\s*([^\r]+)/
 							@none_match = $1
@@ -838,7 +840,10 @@ module Swiftcore
 			# Hardcoded 400 response that is sent if the request is malformed.
 
 			def send_400_response
-				send_data "#{C400Header}Bad Request\n\nThe request received on #{ProxyBag.now.asctime} was malformed and could not be serviced."
+				ip = Socket::unpack_sockaddr_in(get_peername).last rescue Cunknown_host
+				error = "The request received on #{ProxyBag.now.asctime} from #{ip} was malformed and could not be serviced."
+				send_data "#{C400Header}Bad Request\n\n#{error}"
+				ProxyBag.logger.log('info',"Bad Request -- #{error}")
 				close_connection_after_writing
 			end
 
@@ -846,7 +851,10 @@ module Swiftcore
 			# any defined incoming section.
 
 			def send_404_response
-				send_data "#{C404Header}Resource not found.\n\nThe request (#{@uri} --> #{@name}), received on #{ProxyBag.now.asctime} did not match any resource know to this server."
+				ip = Socket::unpack_sockaddr_in(get_peername).last rescue Cunknown_host
+				error = "The request (#{@uri} --> #{@name}), received on #{ProxyBag.now.asctime} from #{ip} did not match any resource know to this server."
+				send_data "#{C404Header}Resource not found.\n\n#{error}"
+				ProxyBag.logger.log('info',"Resource not found -- #{error}")
 				close_connection_after_writing
 			end
 	
@@ -854,7 +862,10 @@ module Swiftcore
 			# waiting for a backend to handle it.
 
 			def send_503_response
-				send_data "#{C503Header}Server Unavailable\n\nThe request (#{@uri} --> #{@name}), received on #{create_time.asctime} timed out before being deployed to a server for processing."
+				ip = Socket::unpack_sockaddr_in(get_peername).last rescue Cunknown_host
+				error = "The request (#{@uri} --> #{@name}), received on #{create_time.asctime} from #{ip} timed out before being deployed to a server for processing."
+				send_data "#{C503Header}Server Unavailable\n\n#{error}"
+				ProxyBag.logger.log('info',"Server Unavailable -- #{error}")
 				close_connection_after_writing
 			end
 	
