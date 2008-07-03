@@ -13,7 +13,7 @@ module Swiftcore
 		HasSplayTree = true unless const_defined?(:HasSplayTree)
 
 		load_state = :deque
-		require 'swiftcore/deque' unless const_defined(:HasDeque)
+		require 'swiftcore/deque' unless const_defined?(:HasDeque)
 		HasDeque = true unless const_defined?(:HasDeque)
 		
 		load_state = :remainder
