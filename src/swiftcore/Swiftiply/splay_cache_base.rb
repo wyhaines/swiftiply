@@ -2,7 +2,7 @@ require 'swiftcore/Swiftiply/cache_base_mixin'
 
 module Swiftcore
 	# Use Array instead of Deque, if Deque wasn't available.
-	Deque = Array unless HasDeque
+	Deque = Array unless HasDeque or const_defined?(:Deque)
 	
 	module Swiftiply
 		class CacheBase < Swiftcore::SplayTreeMap

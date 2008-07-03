@@ -9,11 +9,11 @@ module Swiftcore
 		load_state ||= :start
 		rubygems_loaded ||= false
 		load_state = :splaytreemap
-		require 'swiftcore/splaytreemap'
+		require 'swiftcore/splaytreemap' unless const_defined?(:HasSplayTree)
 		HasSplayTree = true unless const_defined?(:HasSplayTree)
 
 		load_state = :deque
-		require 'swiftcore/deque'
+		require 'swiftcore/deque' unless const_defined(:HasDeque)
 		HasDeque = true unless const_defined?(:HasDeque)
 		
 		load_state = :remainder

@@ -25,7 +25,7 @@ module Swiftcore
 				
 				rt = Time.now - start
 				
-				# This equation is self adaptive based on the amount of work
+				# This algorithm is self adaptive based on the amount of work
 				# completed in the time slice, and the amount of remaining work
 				# in the queue.
 				#@vw / (@vq.length / count) * (rt / @tl)

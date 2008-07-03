@@ -39,23 +39,6 @@ module Swiftcore
 					false
 				end
 			end
-
-#			def verify(path_info)
-#				if f = self[path_info]
-#					if File.exist?(f[3])
-#						mt = File.mtime(f[3])
-#						if mt == f[2]
-#							true
-#						else
-#							false
-#						end
-#					else
-#						false
-#					end
-#				else
-#					false
-#				end
-#			end
 			
 		end
 	end

@@ -2,12 +2,12 @@ require 'swiftcore/Swiftiply/cache_base_mixin'
 
 module Swiftcore
 	# Use Array instead of Deque, if Deque wasn't available.
-	Deque = Array unless HasDeque
+	Deque = Array unless HasDeque or const_defined?(:Deque)
 
 	module Swiftiply
 		class CacheBase < Hash
 			include CacheBaseMixin
-			puts "HashBased"
+
 			def initialize(vw = 900, time_limit = 0.05, maxsize = nil)
 				@vw = vw
 				@tl = time_limit
