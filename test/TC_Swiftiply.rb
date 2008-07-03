@@ -55,6 +55,24 @@ ECONF
 		Net::HTTP.start(hostname,port) {|http| http.delete(url)}
 	end
 	
+	require "#{@@testdir}/../external/httpclient"
+	def httpclient(host, port, request, query_string)
+		r = nil
+		EventMachine.run do
+			http = EventMachine::Protocols::HttpClient.request(
+				:host => host,
+				:port => port,
+				:request => request,
+				:query_string => query_string
+			)
+			http.callback do |response|
+				r = response
+				EM.stop_event_loop
+			end
+		end
+		r
+	end
+	
 	def setup
 		Dir.chdir(@@testdir)
 		SwiftcoreTestSupport.announce(:swiftiply_functional,"Functional Swiftiply Testing")
@@ -83,7 +101,7 @@ ECONF
 		
 		smallfile_name = "smallfile#{Time.now.to_i}"
 		smallfile_path = File.join(dr,smallfile_name)
-		File.open(smallfile_path,'w') {|fh| fh.puts "alfalfa leafcutter bee"}
+		File.open(smallfile_path,'w') {|fh| fh.puts "0123456789"*102}
 		DeleteQueue << smallfile_path
 		
 		bigfile_name = "bigfile#{Time.now.to_i}"
@@ -109,7 +127,10 @@ ECONF
 	
 		response = get_url('127.0.0.1',29998,smallfile_name)
 		small_etag = response['ETag']
-		assert_equal("alfalfa leafcutter bee\n",response.body)
+		assert_equal("0123456789"*102+"\n",response.body)
+		
+		response = httpclient('127.0.0.1',29998,"http://127.0.0.1/#{smallfile_name}",'')
+		assert_equal("0123456789"*102+"\n",response[:content])
 		
 		response = get_url('127.0.0.1',29998,bigfile_name)
 		big_etag = response['ETag']
@@ -128,12 +149,12 @@ ECONF
 		unless ab == ''
 			r = `#{ab} -n 100000 -c 25 http://127.0.0.1:29998/#{smallfile_name}`
 			r =~ /^(Requests per second.*)$/
-			puts "10k 22 byte files, concurrency of 25\n#{$1}\n"
+			puts "10k 1020 byte files, concurrency of 25\n#{$1}\n"
 		end
 		unless ab == ''
 			r = `#{ab} -n 100000 -c 25 -H 'If-None-Match: #{small_etag}' http://127.0.0.1:29998/#{smallfile_name}`
 			r =~ /^(Requests per second.*)$/
-			puts "10k 22 byte files with etag, concurrency of 25\n#{$1}\n"
+			puts "10k 1020 byte files with etag, concurrency of 25\n#{$1}\n"
 		end
 		unless ab == ''
 			r = `#{ab} -n 100000 -i -c 25 http://127.0.0.1:29998/#{smallfile_name}`
@@ -153,7 +174,7 @@ ECONF
 		
 		# And it is still correct?
 		response = get_url('127.0.0.1',29998,smallfile_name)
-		assert_equal("alfalfa leafcutter bee\n",response.body)
+		assert_equal("0123456789"*102+"\n",response.body)
 	end
 
 	def test_serve_static_file_caches
@@ -836,8 +857,20 @@ ECONF
 		# This request should pull the file from the docroot, since it the
 		# docroot was not deleted from the config that was just read.
 		response = get_url('127.0.0.1',29998,'/xyzzy')
-
 		assert_equal("alfalfa leafcutter bee\n",response.body)
+		
+		# Reload the config again, just to make sure we can do it twice;
+		# there was a bug reported about Swiftiply dying after the second HUP,
+		# so we want to make sure we are covered, here.
+		
+		Process.kill 'SIGHUP',swiftiply_pid
+		response = get_url('127.0.0.1',29998,'/xyzzy')
+		assert_equal("alfalfa leafcutter bee\n",response.body,"Swiftiply failure on second HUP.")
+		
+		# And because we're the suspicious types, let's do it a third tim, just to cover the bases.
+		Process.kill 'SIGHUP',swiftiply_pid
+		response = get_url('127.0.0.1',29998,'/xyzzy')
+		assert_equal("alfalfa leafcutter bee\n",response.body,"Swiftiply failure on second HUP.")
 	end
 	
 end
