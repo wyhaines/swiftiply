@@ -6,8 +6,8 @@
 require 'rubygems'
 require 'yaml'
 
-require 'swiftcore/swiftiplied_mongrel' 
-  
+require 'swiftcore/evented_mongrel' 
+
 require 'mongrel/rails'
 require 'etc'
 require 'cgi_multipart_eof_fix' rescue nil
