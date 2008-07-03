@@ -92,7 +92,7 @@ module Swiftcore
 			fileconfig = YAML.load(File.open(config['config_file'])) if config['config_file']
 			config = fileconfig.merge(@cliconfig)
 			postprocess_config_load(config)
-			puts("Configuration failed validation; exiting.") && exit unless verify_config(config)
+			(puts("Configuration failed validation; exiting.") || exit) unless verify_config(config)
 
 			if @print
 				require 'pp'
@@ -127,6 +127,9 @@ module Swiftcore
 		end
 
 		def self.verify_config(config)
+			return nil if config[Ccluster_address].nil?
+			return nil if config[Ccluster_port].nil?
+
 			if config[Cbackend_address] and config[Cbackend_port]
 				config[Cmap] << {Cincoming => nil, Curl => nil, Coutgoing => "#{config[Cbackend_address]}:#{config[Cbackend_port]}", Ckeepalive => true}
 			end
