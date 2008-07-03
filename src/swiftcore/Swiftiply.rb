@@ -16,11 +16,11 @@ module Swiftcore
 		require 'swiftcore/Swiftiply/mocklog'
 		
 		load_state = :deque
-		require 'swiftcore/deque'
+		require 'swiftcore/deque' unless const_define?(:HasDeque)
 		HasDeque = true unless const_defined?(:HasDeque)
 		
 		load_state = :splaytreemap
-		require 'swiftcore/splaytreemap'
+		require 'swiftcore/splaytreemap' unless const_defined?(:HasSplayTree)
 		HasSplayTree = true unless const_defined?(:HasSplayTree)
 		
 		load_state = :remainder
@@ -56,6 +56,7 @@ module Swiftcore
 		raise e
 	end
 
+	GC.start
 	Deque = Array unless HasDeque
 
 	module Swiftiply
@@ -742,15 +743,28 @@ module Swiftcore
 						# as day; one looks at it and it reads like a sentence.  Then, one
 						# comes back to it later, and looks at it when the brain is in a
 						# different zone, and 'lo!  It looks like line noise again.
-						# In case it looks like line noise to you, dear reader, too:
+						#
+						# data =~ /^(\w+) +(?:\w+:\/\/([^\/]+))?([^ \?]+)\S* +HTTP\/(\d\.\d)/
+						#
+						# In case it looks like line noise to you, dear reader, too:						
+						#
 						# 1) Match and save the first set of word characters.
+						#
 						#    Followed by one or more spaces.
-						# 2) Match and save word characters followed by ://
-						#    3) Match and save one or more characters that are not a slash
-						#    And allow this to match 1 or 0 times.
-						# 4) Match and save one or more characters that are not a question mark or whitespace.
-						#    Match stuff.
-						# 5) Match and save a digit dot digit.
+						#
+						#    Match but do not save the word characters followed by ://
+						#
+						#    2) Match and save one or more characters that are not a slash
+						#
+						#    And allow this whole thing to match 1 or 0 times.
+						#
+						# 3) Match and save one or more characters that are not a question
+						#    mark or a space.
+						#
+						#    Match zero or more non-whitespace characters, followed by one
+						#    or more spaces, followed by "HTTP/".
+						#
+						# 4) Match and save a digit dot digit.
 						#
 						# Thus, this pattern will match both the standard:
 						#   GET /bar HTTP/1.1
@@ -760,11 +774,18 @@ module Swiftcore
 						# If the match fails, then this is a bad request, and an appropriate
 						# response will be returned.
 						#
-						if data =~ /^(\w+)\s+(\w+:\/\/([^\/]+))?([^\s\?]+).*(\d\.\d)/
+						if data =~ /^(\w+) +(?:\w+:\/\/([^\/]+))?([^ \?]+)\S* +HTTP\/(\d\.\d)/
 							@request_method = $1
-							@name = $3.intern if $3
-							@uri = $4 || C_blank
-							@http_version = $5
+							@uri = $3 || C_blank
+							@http_version = $4
+							if $2
+								@name = $2.intern
+								# Rewrite the request to get rid of the http://foo portion.
+								# It would be nice if this could be deferred until after the
+								# static file check; if a static file is going to be delivered
+								# by Swiftiply, this rewrite is unnecessary.
+								data.sub!(/^\w+ +\w+:\/\/[^\/]+/,"#{@request_method} ")
+							end
 							@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete(C_percent)].pack('H*')} if @uri.include?(C_percent)
 						else
 							send_400_response
@@ -772,7 +793,7 @@ module Swiftcore
 						end
 					end
 					unless @name
-						if data =~ /^Host:\s*([^\r\0:]+)/
+						if data =~ /^Host: *([^\r\0:]+)/
 							@name = $1.intern
 						end
 					end
@@ -786,7 +807,7 @@ module Swiftcore
 					if d.include?(Crnrn)
 						@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
 						@done_parsing = true
-						if data =~ /^If-None-Match:\s*([^\r]+)/
+						if data =~ /^If-None-Match: *([^\r]+)/
 							@none_match = $1
 						end
 
@@ -994,7 +1015,7 @@ module Swiftcore
 							@headers = h
 						end
 						
-						if @headers =~ /Content-[Ll]ength:\s*([^\r]+)/
+						if @headers =~ /Content-[Ll]ength: *([^\r]+)/
 							@content_length = $1.to_i
 						elsif @headers =~ /Transfer-encoding:\s*chunked/
 							@content_length = nil
@@ -1002,7 +1023,7 @@ module Swiftcore
 							@content_length = 0
 						end
 
-						if @permit_xsendfile && @headers =~ /X-[Ss]endfile:\s*([^\r]+)/
+						if @permit_xsendfile && @headers =~ /X-[Ss]endfile: *([^\r]+)/
 							@associate.uri = $1
 							if ProxyBag.serve_static_file(@associate,ProxyBag.get_sendfileroot(@associate.name))
 								@dont_send_data = true
@@ -1140,7 +1161,7 @@ module Swiftcore
 			new_config = {Ccluster_address => [],Ccluster_port => [],Ccluster_server => {}}
 
 			defaults = config['defaults'] || {}
-			
+
 			if defaults['logger']
 				if config['logger']
 					config['logger'].rmerge!(defaults['logger'])
@@ -1150,11 +1171,11 @@ module Swiftcore
 			else
 				config['logger'] = {'log_level' => 0, 'type' => 'stderror'} unless config['logger']
 			end
-			
+
 			new_log = handle_logger_config(config['logger']) if config['logger']
 			ProxyBag.logger = new_log[:logger] if new_log
 			ProxyBag.log_level = log_level = new_log[:log_level] if new_log
-						
+
 			ssl_addresses = {}
 			# Determine which address/port combos should be running SSL.
 			(config[Cssl] || []).each do |sa|
@@ -1162,10 +1183,11 @@ module Swiftcore
 					ssl_addresses[sa[Cat]] = {Ccertfile => sa[Ccertfile], Ckeyfile => sa[Ckeyfile]}
 				end
 			end
-			 
+
 			addresses = (Array === config[Ccluster_address]) ? config[Ccluster_address] : [config[Ccluster_address]]
 			ports = (Array === config[Ccluster_port]) ? config[Ccluster_port] : [config[Ccluster_port]]
 			addrports = []
+
 			addresses.each do |address|
 				ports.each do |port|
 					addrport = "#{address}:#{port}"
@@ -1219,6 +1241,10 @@ EOC
 							raise EMStartServerError.new(msg)
 						end
 						
+						new_config[Ccluster_address] << address
+						new_config[Ccluster_port] << port unless new_config[Ccluster_port].include?(port)
+					else
+						new_config[Ccluster_server][addrport] = RunningConfig[Ccluster_server][addrport]
 						new_config[Ccluster_address] << address
 						new_config[Ccluster_port] << port unless new_config[Ccluster_port].include?(port)
 					end
