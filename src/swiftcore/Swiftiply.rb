@@ -16,7 +16,7 @@ module Swiftcore
 		require 'swiftcore/Swiftiply/mocklog'
 		
 		load_state = :deque
-		require 'swiftcore/deque' unless const_define?(:HasDeque)
+		require 'swiftcore/deque' unless const_defined?(:HasDeque)
 		HasDeque = true unless const_defined?(:HasDeque)
 		
 		load_state = :splaytreemap
