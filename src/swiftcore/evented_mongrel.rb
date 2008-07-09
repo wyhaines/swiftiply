@@ -129,7 +129,7 @@ module Mongrel
 		def process_http_request(params,linebuffer,client)
 			if not params[Const::REQUEST_PATH]
 				uri = URI.parse(params[Const::REQUEST_URI])
-				params[Const::REQUEST_PATH] = uri.request_uri
+				params[Const::REQUEST_PATH] = uri.path
 			end
 
  			raise "No REQUEST PATH" if not params[Const::REQUEST_PATH]

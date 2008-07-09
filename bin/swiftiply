@@ -84,6 +84,10 @@ module Swiftcore
 				opts.on('-p','--print-config','Print the full configuration.') do
 					@print = true
 				end
+				opts.on('-v','--version','Show the version number, then exit.') do
+					puts "Swiftiply v. #{Swiftcore::Swiftiply::Version}"
+					exit
+				end
 
 			end.parse!
 			@cliconfig ||= config
