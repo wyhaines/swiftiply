@@ -158,4 +158,5 @@ else
 end
 
 
-create_makefile "deque"
+#create_makefile("deque","swiftcore")
+create_makefile("swiftcore/deque","swiftcore")
