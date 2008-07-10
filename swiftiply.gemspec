@@ -1,7 +1,8 @@
 #####
-# Swiftcore Analogger
-#   http://analogger.swiftcore.org
-#   Copyright 2007 Kirk Haines
+# Swiftcore Swiftiply
+#   http://swiftiply.swiftcore.org
+#   Copyright 2007,2008 Kirk Haines
+#   wyhaines@gmail.com
 #
 #   Licensed under the Ruby License.  See the README for details.
 #
@@ -19,8 +20,10 @@ spec = Gem::Specification.new do |s|
   s.rdoc_options      = %w(--title Swiftcore::Swiftiply --main README --line-numbers)
   s.extra_rdoc_files  = %w(README)
   s.extensions        << 'ext/fastfilereader/extconf.rb'
+	s.extensions        << 'ext/deque/extconf.rb'
+	s.extensions        << 'ext/splaytree/extconf.rb'
   s.files             = Dir['**/*']
-	s.executables = %w(swiftiply swiftiplied_mongrel_rails swiftiply_mongrel_rails)
+	s.executables = %w(swiftiply swiftiplied_mongrel_rails evented_mongrel_rails swiftiply_mongrel_rails)
 	s.require_paths = %w(src)
 
 	s.requirements      << "Eventmachine 0.8.1 or higher."
