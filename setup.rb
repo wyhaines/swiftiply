@@ -11,7 +11,8 @@ end
 
 Dir.chdir(basedir)
 Package.setup("1.0") {
-	name "Swiftcore Swiftiply"
+	# TODO pull version right from the code's version.rb.
+	name "Swiftcore Swiftiply v. 0.6.3"
 
 	build_ext "fastfilereader"
 	translate(:ext, 'ext/fastfilereader/' => '/')
@@ -41,6 +42,7 @@ Package.setup("1.0") {
 	bin "bin/swiftiply_mongrel_rails"
 	#File.rename("#{Config::CONFIG["bindir"]}/mongrel_rails","#{Config::CONFIG["bindir"]}/mongrel_rails.orig")
 	bin "bin/swiftiplied_mongrel_rails"
+	bin "bin/evented_mongrel_rails"
 
 	unit_test "test/TC_ProxyBag.rb"
 	unit_test "test/TC_Swiftiply.rb"
