@@ -158,4 +158,4 @@ else
 end
 
 
-create_makefile "splaytreemap"
+create_makefile("swiftcore/splaytreemap","swiftcore")
