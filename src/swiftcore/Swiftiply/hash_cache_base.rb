@@ -13,7 +13,6 @@ module Swiftcore
 				@tl = time_limit
 				@wvtl = vw * time_limit
 				@vq = Deque.new
-				@owner = owner
 				@maxsize = maxsize #max size is irrelevant for a vanilla hash, but it'll be tracked anyway
 				super()
 			end

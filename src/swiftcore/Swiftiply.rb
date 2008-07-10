@@ -57,7 +57,7 @@ module Swiftcore
 	end
 
 	GC.start
-	Deque = Array unless HasDeque
+	Deque = Array unless HasDeque or const_defined?(:Deque)
 
 	module Swiftiply
 		Version = '0.6.3'
