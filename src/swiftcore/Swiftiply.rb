@@ -541,7 +541,9 @@ module Swiftcore
 						# A lot of sites won't need to check X-FORWARDED-FOR, so
 						# we'll only take the time to munge the headers to add
 						# it if the config calls for it.
-						data.sub!(/\r\n\r\n/,"\r\nX-FORWARDED-FOR: #{Socket::unpack_sockaddr_in(clnt.get_peername).last}\r\n\r\n") if x_forwarded_for(clnt.name)
+						if x_forwarded_for(clnt.name) and peername = clnt.get_peername
+							data.sub!(/\r\n\r\n/,"\r\nX-FORWARDED-FOR: #{Socket::unpack_sockaddr_in(peername).last}\r\n\r\n")
+						end
 						
 						data_q.unshift data
 						unless match_client_to_server_now(clnt)
