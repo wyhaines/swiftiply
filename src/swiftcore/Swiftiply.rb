@@ -1,4 +1,17 @@
 module Swiftcore
+	# TODO:
+	#
+	# 1) Basic HTTP Authentication
+	# 2) Stats
+	#   Stats will be recorded in aggregate and for each incoming section, and may
+	#   accessed through a separate stats port via a RESTful HTTP request which
+	#   identifies the section to pull stats for, and the authentication key for
+	#   access to those stats.
+	# 3) Maintenance Page Support
+	#   This is a path to a static file which will be returned on a 503 error.
+	# 4) GZip compression
+	#   Can be toggled on or off.  Configure mime types to compress.  Implemented
+	#   via an extension.
 
 	# A little statemachine for loading requirements.  The intention is to
 	# only load rubygems if necessary, and to load the Deque and SplayTreeMap
