@@ -110,7 +110,8 @@ module Mongrel
 		def run
 			trap('INT') { raise StopServer }
 			trap('TERM') { raise StopServer }
-			@acceptor = Thread.new do
+			#@acceptor = Thread.new do
+			@acceptor = Thread.current
 				# SHOULD NOT DO THIS AUTOMATICALLY.
 				# There either needs to be a way to configure this, or to detect
 				# when it is safe or when kqueue needs to run.
@@ -123,7 +124,7 @@ module Mongrel
 						EventMachine.stop_event_loop
 					end
 				end
-			end
+			#end
 		end
 
 		def process_http_request(params,linebuffer,client)

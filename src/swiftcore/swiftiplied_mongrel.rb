@@ -120,7 +120,8 @@ module Mongrel
 		def run
 			trap('INT') { EventMachine.stop_event_loop }
 			trap('TERM') { EventMachine.stop_event_loop }
-			@acceptor = Thread.new do
+			#@acceptor = Thread.new do
+			@acceptor = Thread.current
 				EventMachine.run do
 					begin
 						MongrelProtocol.connect(@host,@port.to_i,@key)
@@ -128,7 +129,7 @@ module Mongrel
 						EventMachine.stop_event_loop
 					end
 				end
-			end
+			#end
 		end
 		
 		def process_http_request(params,linebuffer,client)
