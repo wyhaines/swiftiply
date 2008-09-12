@@ -12,6 +12,7 @@ module Swiftcore
 	# 4) GZip compression
 	#   Can be toggled on or off.  Configure mime types to compress.  Implemented
 	#   via an extension.
+	# 5) Keepalive
 
 	# A little statemachine for loading requirements.  The intention is to
 	# only load rubygems if necessary, and to load the Deque and SplayTreeMap
@@ -173,6 +174,7 @@ module Swiftcore
 			@dynamic_request_map = {}
 			@etag_cache_map = {}
 			@x_forwarded_for = {}
+			@keepalive = {}
 			@static_mask = {}
 			@keys = {}
 			@filters = {}
@@ -340,6 +342,18 @@ module Swiftcore
 					@filters[name].clear if @filters[name]
 				end
 				
+				def add_keepalive(timeout, name)
+					@keepalive[name] = timeout == 0 ? false : timeout
+				end
+				
+				def keepalive(name)
+					@keepalive[name]
+				end
+				
+				def remove_keepalive(name)
+					@keepalive[name] = false
+				end
+	
 				# Sets the default proxy destination, if requests are received
 				# which do not match a defined destination.
 				
@@ -423,6 +437,17 @@ module Swiftcore
 						client_name = clnt.name
 						dr ||= @docroot_map[client_name]
 						fc = @file_cache_map[client_name]
+						
+						# To support keepalive, there needs to be a way to detect whether
+						#
+						# Connection: close
+						#
+						# or
+						#
+						# Connection: Keep-Alive
+						#
+						# should be sent.  This should probably be a param on the client.
+						
 						if data = fc[path_info]
 							none_match = clnt.none_match
 							same_response = case
@@ -826,6 +851,32 @@ module Swiftcore
 							@none_match = $1
 						end
 
+						# Keep-Alive works differently on HTTP 1.0 versus HTTP 1.1
+						# HTTP 1.0 was not written to support Keep-Alive initially; it was
+						# bolted on.  Thus, for an HTTP 1.0 client to indicate that it
+						# wants to initiate a Keep-Alive session, it must send a header:
+						#
+						# Connection: Keep-Alive
+						#
+						# Then, when the server sends the response, it must likewise add:
+						#
+						# Connection: Keep-Alive
+						#
+						# to the response.
+						#
+						# For HTTP 1.1, Keep-Alive is assumed.  If a client does not want
+						# Keep-Alive, then it must send the following header:
+						#
+						# Connection: close
+						#
+						# Likewise, if the server does not want to keep the connection
+						# alive, it must send the same header:
+						#
+						# Connection: close
+						#
+						# to the client.
+						
+						
 						if @name
 							ProxyBag.add_frontend_client(self,@data,data)
 						else
