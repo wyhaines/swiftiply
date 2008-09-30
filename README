@@ -1,4 +1,4 @@
-Swiftiply v. 0.6.3  (http://swiftiply.swiftcore.org)
+Swiftiply v. 0.6.4  (http://swiftiply.swiftcore.org)
 
 Swiftiply is a backend agnostic clustering proxy for web applications that is
 specifically designed to support HTTP traffic from web frameworks. Unlike Pen
@@ -121,6 +121,3 @@ map:
     - www.swiftiply.com
     - swiftiply.swiftcore.org
     outgoing: 127.0.0.1:30030
-
-
-
