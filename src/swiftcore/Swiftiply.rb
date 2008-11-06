@@ -96,6 +96,7 @@ module Swiftcore
 		Ccluster_port = 'cluster_port'.freeze
 		Ccluster_server = 'cluster_server'.freeze
 		CConnection_close = "Connection: close\r\n".freeze
+		CConnection_KeepAlive = "Connection: Keep-Alive\r\n".freeze
 		CBackendAddress = 'BackendAddress'.freeze
 		CBackendPort = 'BackendPort'.freeze
 		Ccertfile = 'certfile'.freeze
@@ -475,7 +476,11 @@ module Swiftcore
 							end
 							clnt.close_connection_after_writing
 							true
-						elsif path = find_static_file(dr,path_info,client_name)
+						elsif path = find_static_file(dr,path_info,client_name) # See if the static file that is wanted exists on the filesystem.
+							#TODO: There is a race condition here between when we detect whether the file is there, and when we start to deliver it.
+							#  It'd be nice to handle an exception when trying to read the file in a graceful way, by falling out as if no static
+							#  file had been found.  That way, if the file is deleted between detection and the start of delivery, such as might
+							#  happen when delivering files out of some sort of page cache, it can be handled in a reasonable manner.
 							none_match = clnt.none_match
 							etag,mtime = @etag_cache_map[client_name].etag_mtime(path)
 							same_response = nil
@@ -492,7 +497,7 @@ module Swiftcore
 								oh = fc.owner_hash
 								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
-								ct = @typer.simple_type_for(path) || Caos
+								ct = @typer.simple_type_for(path) || Caos 
 								fsize = File.size(path)
 
 								header_line = "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n"
@@ -533,7 +538,8 @@ module Swiftcore
 				rescue Object => e
 					puts e
 					@logger.log('error',"Failed request for #{dr.inspect}/#{path.inspect} -- #{e} @ #{e.backtrace.inspect}") if @log_level > 0
-
+					
+					# TODO: This is uncivilized; if there is an unexpected error, a reasonable response MUST be returned.
 					clnt.close_connection_after_writing
 					false
 				end				
@@ -762,10 +768,18 @@ module Swiftcore
 				@data = Deque.new
 				#@data = []
 				@data_pos = 0
-				@hmp = @name = @uri = @http_version = @request_method = @none_match = @done_parsing = nil
+				@connection_header = CConnection_close
+				@hmp = @name = @uri = @http_version = @request_method = @none_match = @done_parsing = @keepalive = nil
 				super
 			end
 
+			def reset_state
+				@data.clear
+				@data_pos = 0
+				@connection_header = CConnection_close
+				@hmp = @name = @uri = @http_version = @request_method = @none_match = @done_parsing = @keepalive = nil
+			end
+			
 			# States:
 			# uri
 			# name
@@ -814,20 +828,24 @@ module Swiftcore
 						# If the match fails, then this is a bad request, and an appropriate
 						# response will be returned.
 						#
-						if data =~ /^(\w+) +(?:\w+:\/\/([^\/]+))?([^ \?]+)\S* +HTTP\/(\d\.\d)/
+						# http://www.w3.org/Protocols/rfc2616/rfc2616-sec3.html#sec5.1.2
+						#
+						if data =~ /^(\w+) +(?:\w+:\/\/([^ \/]+))?([^ \?]*)\S* +HTTP\/(\d\.\d)/
 							@request_method = $1
-							@uri = $3 || C_blank
+							@uri = $3
 							@http_version = $4
 							if $2
 								@name = $2.intern
+								@uri = C_slash if @uri.empty?
 								# Rewrite the request to get rid of the http://foo portion.
 								# It would be nice if this could be deferred until after the
 								# static file check; if a static file is going to be delivered
 								# by Swiftiply, this rewrite is unnecessary.
-								data.sub!(/^\w+ +\w+:\/\/[^\/]+/,"#{@request_method} ")
+								data.sub!(/^\w+ +\w+:\/\/[^ \/]+([^ \?]*)/,"#{@request_method} #{@uri}")
 							end
-							@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete(C_percent)].pack('H*')} if @uri.include?(C_percent)
+							@uri = @uri.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete(C_percent)].pack('H*')} if @uri.include?(C_percent)
 						else
+							puts data
 							send_400_response
 							return
 						end
@@ -847,7 +865,7 @@ module Swiftcore
 					if d.include?(Crnrn)
 						@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
 						@done_parsing = true
-						if data =~ /^If-None-Match: *([^\r]+)/
+						if data =~ /If-None-Match: *([^\r]+)/
 							@none_match = $1
 						end
 
@@ -876,8 +894,28 @@ module Swiftcore
 						#
 						# to the client.
 						
-						
 						if @name
+							if ProxyBag.keepalive(@name)
+								if @http_version == C1_0
+									if data =~ /Connection: Keep-Alive/
+										# Nonstandard HTTP 1.0 situation; apply keepalive.
+										@keepalive = true
+										@connection_header = CConnection_KeepAlive
+									else
+										# Standard HTTP 1.0 situation; connection will be closed.
+										@connection_header = C_empty
+									end
+								else
+									if data =~ /Connection: Close/
+										# Nonstandard HTTP 1.1 situation; connection will be closed.
+									else
+										# Standard HTTP 1.1 situation; apply keepalive.
+										@connection_header = C_empty
+										@keepalive = true
+									end
+								end
+							end
+							
 							ProxyBag.add_frontend_client(self,@data,data)
 						else
 							send_404_response
@@ -1100,14 +1138,10 @@ module Swiftcore
 									@associate.close_connection_after_writing
 									@dont_send_data = true
 								else
-									#@associate.send_data @headers
-									#@associate.send_data Crnrn
 									@associate.send_data @headers + Crnrn
 								end
 							end
 						else
-							#@associate.send_data @headers
-							#@associate.send_data Crnrn
 							@associate.send_data @headers + Crnrn
 						end
 					else

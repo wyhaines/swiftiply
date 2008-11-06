@@ -20,7 +20,10 @@ end
 module Mongrel
 	C0s = [0,0,0,0].freeze unless const_defined?(:C0s)
 	CCCCC = 'CCCC'.freeze unless const_defined?(:CCCCC)
+	Cblank = ''.freeze
 
+	C400Header = "HTTP/1.0 400 Bad Request\r\nContent-Type: text/plain\r\nServer: Swiftiplied Mongrel 0.6.5\r\nConnection: close\r\n\r\n"
+	
 	class MongrelProtocol < SwiftiplyClientProtocol
 
 		def post_init
@@ -34,13 +37,19 @@ module Mongrel
 
 		def receive_data data
 			@linebuffer << data
+
 			@nparsed = @parser.execute(@params, @linebuffer, @nparsed) unless @parser.finished?
 			if @parser.finished?
-				if @request_len.nil?
+				
+				unless @params[::Mongrel::Const::REQUEST_PATH]
+					params[::Mongrel::Const::REQUEST_PATH] = URI.parse(params[::Mongrel::Const::REQUEST_URI]).path
+				end
+				
+				unless @request_len
 					@request_len = @params[::Mongrel::Const::CONTENT_LENGTH].to_i
 					script_name, path_info, handlers = ::Mongrel::HttpServer::Instance.classifier.resolve(@params[::Mongrel::Const::REQUEST_PATH])
 					if handlers
-						@params[::Mongrel::Const::PATH_INFO] = path_info
+						@params[::Mongrel::Const::PATH_INFO] = path_info || Cblank # path_info shouldn't be nil, but just in case it somehow is, let's make sure we don't crash later because of it.
 						@params[::Mongrel::Const::SCRIPT_NAME] = script_name
 						# The previous behavior of this line set REMOTE_ADDR equal to HTTP_X_FORWARDED_FOR
 						# if it was defined.  This behavior seems inconsistent with the intention of
@@ -74,11 +83,17 @@ module Mongrel
 			if $mongrel_debug_client
 				STDERR.puts "#{Time.now}: BAD CLIENT (#{params[Const::HTTP_X_FORWARDED_FOR] || client.peeraddr.last}): #$!"
 				STDERR.puts "#{Time.now}: REQUEST DATA: #{data.inspect}\n---\nPARAMS: #{params.inspect}\n---\n"
-			end
-			close_connection
+			end			
 		rescue Exception => e
-			close_connection
+			# This isn't a parse error; if this rescue caught an exception, then something
+			# significant happened.  
 			raise e
+		ensure
+			# No matter what, disconnect from our upstream in a graceful way, or at
+			# least try to; if execution is still happening, it should be fine.
+			send_data C400Header
+			close_connection
+			@linebuffer.delete if Tempfile === @linebuffer
 		end
 
 		def write data
@@ -164,7 +179,7 @@ module Mongrel
 				# 404 response.
 				response = HttpResponse.new(client)
 				response.status = 404
-				response.body = "#{params[Const::REQUEST_PATH]} not found"
+				response.body << "#{params[Const::REQUEST_PATH]} not found"
 				response.finished
 			end
 		end
@@ -187,6 +202,7 @@ module Mongrel
 	end
 
 	class HttpResponse
+		
 		def send_file(path, small_file = false)
 			File.open(path, "rb") do |f|
 				while chunk = f.read(Const::CHUNK_SIZE) and chunk.length > 0

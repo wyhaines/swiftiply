@@ -21,6 +21,7 @@ module Mongrel
 	class MongrelProtocol < EventMachine::Connection
 		
 		Cblank = ''.freeze
+		C400Header = "HTTP/1.0 400 Bad Request\r\nContent-Type: text/plain\r\nServer: Swiftiplied Mongrel 0.6.5\r\nConnection: close\r\n\r\n"
 		
 		def post_init
 			@parser = HttpParser.new
@@ -35,7 +36,7 @@ module Mongrel
 			@linebuffer << data
 			@nparsed = @parser.execute(@params, @linebuffer, @nparsed) unless @parser.finished?
 			if @parser.finished?
-				if @request_len.nil?
+				unless @request_len
 					@request_len = @params[::Mongrel::Const::CONTENT_LENGTH].to_i
 					script_name, path_info, handlers = ::Mongrel::HttpServer::Instance.classifier.resolve(@params[::Mongrel::Const::REQUEST_PATH] || Cblank)
 					if handlers
@@ -73,10 +74,11 @@ module Mongrel
 				STDERR.puts "#{Time.now}: BAD CLIENT (#{params[Const::HTTP_X_FORWARDED_FOR] || client.peeraddr.last}): #$!"
 				STDERR.puts "#{Time.now}: REQUEST DATA: #{data.inspect}\n---\nPARAMS: #{params.inspect}\n---\n"
 			end
-			close_connection
 		rescue Exception => e
-			close_connection
 			raise e
+		ensure
+			send_data C400Header
+			close_connection
 		end
 
 		def write data
