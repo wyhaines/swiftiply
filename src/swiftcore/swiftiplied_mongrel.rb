@@ -83,16 +83,17 @@ module Mongrel
 			if $mongrel_debug_client
 				STDERR.puts "#{Time.now}: BAD CLIENT (#{params[Const::HTTP_X_FORWARDED_FOR] || client.peeraddr.last}): #$!"
 				STDERR.puts "#{Time.now}: REQUEST DATA: #{data.inspect}\n---\nPARAMS: #{params.inspect}\n---\n"
-			end			
+			end
+			send_data C400Header
+			close_connection_after_writing
 		rescue Exception => e
 			# This isn't a parse error; if this rescue caught an exception, then something
 			# significant happened.  
 			raise e
-		ensure
-			# No matter what, disconnect from our upstream in a graceful way, or at
-			# least try to; if execution is still happening, it should be fine.
 			send_data C400Header
-			close_connection
+			close_connection_after_writing
+		ensure
+			# Make sure to cleanup the Tempfile.
 			@linebuffer.delete if Tempfile === @linebuffer
 		end
 

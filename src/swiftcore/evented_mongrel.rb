@@ -36,7 +36,7 @@ module Mongrel
 			@linebuffer << data
 			@nparsed = @parser.execute(@params, @linebuffer, @nparsed) unless @parser.finished?
 			if @parser.finished?
-				unless @request_len
+				if @request_len.nil?
 					@request_len = @params[::Mongrel::Const::CONTENT_LENGTH].to_i
 					script_name, path_info, handlers = ::Mongrel::HttpServer::Instance.classifier.resolve(@params[::Mongrel::Const::REQUEST_PATH] || Cblank)
 					if handlers
@@ -74,11 +74,12 @@ module Mongrel
 				STDERR.puts "#{Time.now}: BAD CLIENT (#{params[Const::HTTP_X_FORWARDED_FOR] || client.peeraddr.last}): #$!"
 				STDERR.puts "#{Time.now}: REQUEST DATA: #{data.inspect}\n---\nPARAMS: #{params.inspect}\n---\n"
 			end
+			send_data C400Header
+			close_connection_after_writing
 		rescue Exception => e
 			raise e
-		ensure
 			send_data C400Header
-			close_connection
+			close_connection_after_writing
 		end
 
 		def write data
