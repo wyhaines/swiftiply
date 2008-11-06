@@ -12,7 +12,7 @@ spec = Gem::Specification.new do |s|
   s.name              = 'swiftiply'
   s.author            = %q(Kirk Haines)
   s.email             = %q(wyhaines@gmail.com)
-  s.version           = '0.6.3'
+  s.version           = '0.6.4'
   s.summary           = %q(A fast clustering proxy for web applications.)
   s.platform          = Gem::Platform::RUBY
 

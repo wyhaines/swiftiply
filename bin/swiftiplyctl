@@ -1,0 +1,283 @@
+#!/usr/bin/env ruby
+
+require 'optparse'
+require 'socket'
+require 'yaml'
+
+ENV['SWIFT'] = 'true'
+
+class ServerInstance
+  attr_accessor :instances,:location,:online,:port
+
+  def initialize(port,options = {})
+    self.instances = options.delete(:instances)
+    self.location = options.delete(:location)
+    self.port = port
+    begin
+      TCPSocket.open('127.0.0.1',self.port).close
+      self.online = true
+    rescue Errno::ECONNREFUSED
+      self.online = false
+    end
+  end
+
+  def log(msg)
+    STDERR.print msg
+  end
+end
+
+class MongrelInstance < ServerInstance
+  attr_accessor :pid_cache
+
+  def add
+    log "Adding #{self.instances} Mongrel instance#{'s' unless self.instances == 1}\n"
+    self.launch_instances
+    log "\n"
+  end
+
+  def initialize(*args)
+    super
+    self.online = !self.pids.empty?
+  end
+
+  def launch_instances
+    size = self.pids.size
+    self.instances.times do |i|
+      pid = size+i
+      # I know we specified env['swift'] above, but hey, it never hurts to double-check
+      `env SWIFT=1 mongrel_rails start -c #{self.location} -p #{self.port} -d -P #{File.join(self.location,'log',"dog#{pid.to_s.rjust(3,"0")}.pid")}`
+      sleep 1
+      log "Mongrel instance ##{pid+1} started#{"\n" unless i+1 == self.instances}"
+    end
+  end
+
+  def pids
+    self.pid_cache ||= Dir.glob(File.join(self.location,'log','dog*.pid')).sort
+  end
+
+  def remove
+    log "Shaving #{self.instances} Mongrel instance#{'s' unless self.instances == 1} from the stack... "
+    if self.pids.empty?
+      log "No Mongrel instances!"
+    else
+      self.instances.times do |i|
+        self.stop_instance(self.pids.pop)
+      end
+      log "Done!"
+    end
+    log "\n"
+  end
+
+  def start
+    log "Starting #{self.instances} Mongrel instance#{'s' unless self.instances == 1} on port #{self.port}... "
+    if !self.pids.empty?
+      log 'Mongrel already started'
+    else
+      log "\n"
+      self.launch_instances
+    end
+    log "\n"
+  end
+
+  def status
+    log "Mongrel:   #{self.online ? "\033[1;32mOnline\033[00m
+Instances: \033[1;32m#{self.pids.size}\033[00m" : "\033[1;31mOffline\033[00m"}\n"
+  end
+
+  def stop
+    log 'Shutting down Mongrel... '
+    # We work based on pids b/c Swiftiplied Mongrel instances don't reply to TCPSocket connections for some reason
+    if !self.pids.empty?
+      for pid in self.pids
+        self.stop_instance(pid)
+      end
+      log 'Done!'
+    else
+      log "No active Mongrel instance#{'s' unless self.instances == 1} on port #{self.port}"
+    end
+    log "\n"
+  end
+
+  def stop_instance(pid)
+    Process.kill("KILL",File.read(pid).to_i)
+    File.unlink(pid)
+    sleep 1
+  end
+end
+
+class SwiftiplyInstance < ServerInstance
+  attr_accessor :pid
+
+  def initialize(*args)
+    super
+    self.pid = `pgrep -f 'swiftiply -c #{File.expand_path(File.join(self.location,'config','swiftiply.yml'))}'`
+    self.online = self.pid != ""
+  end
+
+  def start
+    log "Starting Swiftiply instance on port #{self.port}... "
+    if self.online
+      log 'Swiftiply already started'
+    else
+      # Okay, Swiftiply actually switched pids on me regularly, so I'm going a different route with this one...
+      IO.popen("swiftiply -c #{File.expand_path(File.join(self.location,'config','swiftiply.yml'))}")
+      log 'Done!'
+    end
+    log "\n"
+  end
+
+  def status
+    log "Swiftiply: #{self.online ? "\033[1;32mOnline\033[00m" : "\033[1;31mOffline\033[00m"}\n"
+  end
+
+  def stop
+    log 'Shutting down Swiftiply... '
+    if self.online
+      Process.kill("KILL",self.pid.to_i)
+      sleep 1
+      log 'Done!'
+    else
+      log "No active Swiftiply instance on port #{self.port}"
+    end
+    log "\n"
+  end
+end
+
+class SwiftiplyControl
+  def self.load_config
+    if @command =~ /(status_all)/
+      @mongrel_pids = `pgrep -l -f 'mongrel'`.split("\n")
+      @swift_pids = `pgrep -l -f 'swiftiply'`.split("\n")
+    elsif File.exists?(@location)
+      config_dir = File.join(@location,'config')
+      yml_path = File.join(config_dir,'swiftiply.yml')
+      if File.exists?(yml_path)
+        yaml = YAML::load(File.open(yml_path))
+        @mongrel = MongrelInstance.new(yaml["map"].first["outgoing"].split(":").last.strip,:instances => (@config[:instances] || yaml["n"]).to_i,:location => @location)
+        @swiftiply = SwiftiplyInstance.new(yaml["cluster_port"],:location => @location)
+      else
+        response = ""
+        while response !~ /(Y|n)/
+          log "No swiftiply.yml file found in #{File.join(@dir || ".",'config')}. Would you like to generate one now? [Yn] "
+          response = STDIN.gets.chomp 
+        end
+        @config[:instances] = "2" unless @config[:instances].to_i > 0
+        if response == 'Y'
+          Dir.mkdir(config_dir) unless File.exists?(config_dir)
+          yaml = "cluster_address: 127.0.0.1
+cluster_port: 3000
+daemonize: true
+epoll: true
+epoll_descriptors: 8192
+map:
+- incoming: localhost
+  outgoing: 127.0.0.1:5000
+  default: true
+  docroot: #{@location}
+  redeployable: true
+n: #{@config[:instances]}"
+          file = File.open(yml_path,'w+')
+          file.write(yaml)
+          file.close
+          self.load_config
+        else
+          exit!
+        end
+      end
+    else
+      log "No site found at #{@location}\n"
+      exit!
+    end
+  end
+
+  def self.log(msg)
+    STDERR.print msg
+  end
+
+  def self.parse_options(config = {})
+    defaults = {}
+  	OptionParser.new do |opts|
+  		opts.banner = 'Usage: swiftiply_config <command> [options]'
+  		opts.separator ''
+  		opts.on('-n','--num-mongrels [NUM]','The number of mongrels to start.') do |num|
+  			config[:instances] = num
+  		end
+  	end.parse!
+  	@config = defaults.update(config)
+  	if @command
+  	  @dir = ARGV.shift
+      @location = @dir.nil? ? Dir.pwd : @dir[0,1] == "/" ? @dir : File.join(Dir.pwd,@dir)
+      self.load_config
+    end
+  end
+
+  def self.run
+    @command = ARGV.shift
+    parse_options
+    case @command
+    when "add_mongrel"
+      @mongrel.instances = (@config[:instances] || "1").to_i
+      @mongrel.add
+    when "remove_mongrel"
+      @mongrel.instances = (@config[:instances] || "1").to_i
+      @mongrel.remove
+    when "restart"
+      @mongrel.stop
+      @mongrel.start
+      @swiftiply.stop
+      @swiftiply.start
+    when "restart_mongrel"
+      @mongrel.stop
+      @mongrel.start
+    when "restart_swift"
+      @swiftiply.stop
+      @swiftiply.start
+    when "start"
+      @mongrel.start
+      @swiftiply.start
+    when "start_mongrel"
+      @mongrel.start
+    when "start_swift"
+      @swiftiply.start
+    when "status"
+      @mongrel.status
+      @swiftiply.status
+    when "status_all"
+      pids = [@swift_pids.select{|pid| pid =~ /swiftiply -c (.+)$/}.collect{|pid| pid.slice(/swiftiply -c (.+)$/).gsub(/(swiftiply -c |\/config\/swiftiply\.yml)/,'')},@mongrel_pids.select{|pid| pid =~ /-c ([^ ]+) /}.collect{|pid| File.expand_path(pid.match(/-c ([^ ]+) /)[1].strip + "/")}].flatten.uniq.compact.sort
+      for server in pids
+        log "#{server}\n"
+        `swift status #{server}`
+        log "\n"
+      end
+    when "stop"
+      @mongrel.stop
+      @swiftiply.stop
+    when "stop_mongrel"
+      @mongrel.stop
+    when "stop_swift"
+      @swiftiply.stop
+    else
+      log "#{@command} is not a valid command\n" unless @command.nil?
+      log "Usage: swiftiply_ctl <command> [options]
+Available commands are:
+
+ - add_mongrel
+ - remove_mongrel
+ - restart
+ - restart_mongrel
+ - restart_swift
+ - start
+ - start_mongrel
+ - start_swift
+ - status
+ - stop
+ - stop_mongrel
+ - stop_swift
+
+Each command takes -h as an option to get help.
+"
+    end
+  end
+end
+
+SwiftiplyControl.run

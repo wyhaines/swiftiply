@@ -74,7 +74,7 @@ module Swiftcore
 	Deque = Array unless HasDeque or const_defined?(:Deque)
 
 	module Swiftiply
-		Version = '0.6.3'
+		Version = '0.6.4'
 
 		# Yeah, these constants look kind of tacky.  Inside of tight loops,
 		# though, using them makes a small but measurable difference, and those
