@@ -89,6 +89,104 @@ ECONF
 		end
 	end
 
+	# Configure a Swiftiply, change the config, HUP it, and see if the changes
+	# are picked up.
+	
+	def test_HUP
+		puts "\nTesting HUP handling"
+		dc = File.join(Dir.pwd,'TC_Swiftiply')
+		dr = File.join(dc,'test_serve_static_file')
+		
+		conf_file = File.join(dc,'test_HUP.conf')
+		File.open(conf_file,'w+') do |fh|
+			conf = YAML.load(ConfBase.to_yaml)
+			conf['map'].first.delete('docroot')
+			fh.write conf.to_yaml
+		end
+
+		DeleteQueue << conf_file
+		
+		smallfile_name = "xyzzy"
+		smallfile_path = File.join(dr,smallfile_name)
+		File.open(smallfile_path,'w') {|fh| fh.puts "alfalfa leafcutter bee"}
+		DeleteQueue << smallfile_path
+		
+		swiftiply_pid = nil
+		assert_nothing_raised("setup failed") do
+			KillQueue << swiftiply_pid = SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src ../../bin/swiftiply -c test_HUP.conf"])
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
+				:cmd => ["#{Ruby} -I../../src ../bin/echo_client 127.0.0.1:29999"])
+			sleep 1
+		end
+
+		# Normal request for a sanity check.
+		response = get_url('127.0.0.1',29998,'/xyzzy')
+		assert_equal("GET /xyzzy HTTP/1.1\r\nAccept: */*\r\nHost: 127.0.0.1:29998\r\n\r\n",response.body)
+		
+		# Now rewrite the conf file to be a little different.
+		File.open(conf_file,'w+') {|fh| fh.write ConfBase.to_yaml }
+		
+		# Reload the config
+		Process.kill 'SIGHUP',swiftiply_pid
+		
+		# This request should pull the file from the docroot, since it the
+		# docroot was not deleted from the config that was just read.
+		response = get_url('127.0.0.1',29998,'/xyzzy')
+		assert_equal("alfalfa leafcutter bee\n",response.body)
+		
+		# Reload the config again, just to make sure we can do it twice;
+		# there was a bug reported about Swiftiply dying after the second HUP,
+		# so we want to make sure we are covered, here.
+		
+		Process.kill 'SIGHUP',swiftiply_pid
+		response = get_url('127.0.0.1',29998,'/xyzzy')
+		assert_equal("alfalfa leafcutter bee\n",response.body,"Swiftiply failure on second HUP.")
+		
+		# And because we're the suspicious types, let's do it a third tim, just to cover the bases.
+		Process.kill 'SIGHUP',swiftiply_pid
+		response = get_url('127.0.0.1',29998,'/xyzzy')
+		assert_equal("alfalfa leafcutter bee\n",response.body,"Swiftiply failure on second HUP.")
+	end
+
+	# Do some basic sanity tests of evented mongrel, and also run a simple
+	# perf test against evented mongrel and threaded mongrel.
+	
+	def test_evented_mongrel
+		puts "\nTesting Evented Mongrel"
+		
+		assert_nothing_raised("setup failed") do
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => File.join('TC_Swiftiply','mongrel'),
+				:cmd => ["#{Ruby} -I../../../src threaded_hello.rb"])
+			sleep 1
+			KillQueue << SwiftcoreTestSupport::create_process(:dir => File.join('TC_Swiftiply','mongrel'),
+				:cmd => ["#{Ruby} -I../../../src evented_hello.rb"])
+		end
+		
+		sleep 1
+		
+		response = get_url('127.0.0.1',29998,'/hello')
+		assert_equal("hello!\n",response.body)
+		
+		response = get_url('127.0.0.1',29998,'/dir')
+		assert_equal("<html><head><title>Directory Listing",response.body[0..35])
+		
+		ab = `which ab`.chomp
+		unless ab == ''
+			puts "\nThreaded Mongrel..."
+			rt = `#{ab} -n 10000 -c 25 http://127.0.0.1:29997/hello`
+			rt =~ /^(Requests per second.*)$/
+			rts = $1
+			puts "\nEvented Mongrel..."
+			re = `#{ab} -n 10000 -c 25 http://127.0.0.1:29998/hello`
+			re =~ /^(Requests per second.*)$/
+			res = $1
+			puts "\nThreaded Mongrel, no proxies, concurrency of 25\n#{rts}"
+			puts "Evented Mongrel, no proxies, concurrency of 25\n#{res}"
+			sleep 1
+		end
+	end
+
 	#####	
 	# Test serving a small file (no chunked encoding) and a large file (chunked
 	# encoding).
@@ -129,6 +227,7 @@ ECONF
 		small_etag = response['ETag']
 		assert_equal("0123456789"*102+"\n",response.body)
 		
+		# Make sure the file is retrieved if a proxy style request is used.
 		response = httpclient('127.0.0.1',29998,"http://127.0.0.1/#{smallfile_name}",'')
 		assert_equal("0123456789"*102+"\n",response[:content])
 		
@@ -149,25 +248,30 @@ ECONF
 		unless ab == ''
 			r = `#{ab} -n 100000 -c 25 http://127.0.0.1:29998/#{smallfile_name}`
 			r =~ /^(Requests per second.*)$/
-			puts "10k 1020 byte files, concurrency of 25\n#{$1}\n"
+			puts "10k 1020 byte files, concurrency of 25; no KeepAlive\n#{$1}\n"
 		end
 		unless ab == ''
-			r = `#{ab} -n 100000 -c 25 -H 'If-None-Match: #{small_etag}' http://127.0.0.1:29998/#{smallfile_name}`
+			r = `#{ab} -n 100000 -c 25 -k http://127.0.0.1:29998/#{smallfile_name}`
+			r =~ /^(Requests per second.*)$/
+			puts "10k 1020 byte files, concurrency of 25; with KeepAlive\n#{$1}\n"
+		end
+		unless ab == ''
+			r = `#{ab} -n 100000 -c 25 -k -H 'If-None-Match: #{small_etag}' http://127.0.0.1:29998/#{smallfile_name}`
 			r =~ /^(Requests per second.*)$/
 			puts "10k 1020 byte files with etag, concurrency of 25\n#{$1}\n"
 		end
 		unless ab == ''
-			r = `#{ab} -n 100000 -i -c 25 http://127.0.0.1:29998/#{smallfile_name}`
+			r = `#{ab} -n 100000 -i -c 25 -k http://127.0.0.1:29998/#{smallfile_name}`
 			r =~ /^(Requests per second.*)$/
 			puts "10k HEAD requests, concurrency of 25\n#{$1}\n"
 		end
 		unless ab == ''
-			r = `#{ab} -n 20000 -c 25 http://127.0.0.1:29998/#{bigfile_name}`
+			r = `#{ab} -n 20000 -c 25 -k http://127.0.0.1:29998/#{bigfile_name}`
 			r =~ /^(Requests per second.*)$/
 			puts "10k 78000 byte files, concurrency of 25\n#{$1}\n"
 		end
 		unless ab == ''
-			r = `#{ab} -n 20000 -c 25 -H 'If-None-Match: #{big_etag}' http://127.0.0.1:29998/#{bigfile_name}`
+			r = `#{ab} -n 20000 -c 25 -k -H 'If-None-Match: #{big_etag}' http://127.0.0.1:29998/#{bigfile_name}`
 			r =~ /^(Requests per second.*)$/
 			puts "10k 78000 byte files with etag, concurrency of 25\n#{$1}\n"
 		end
@@ -745,40 +849,6 @@ ECONF
 		puts "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"
 	end
 	
-	def test_evented_mongrel
-		puts "\nTesting Evented Mongrel"
-		
-		assert_nothing_raised("setup failed") do
-			KillQueue << SwiftcoreTestSupport::create_process(:dir => File.join('TC_Swiftiply','mongrel'),
-				:cmd => ["#{Ruby} -I../../../src evented_hello.rb"])
-			KillQueue << SwiftcoreTestSupport::create_process(:dir => File.join('TC_Swiftiply','mongrel'),
-				:cmd => ["#{Ruby} -I../../../src threaded_hello.rb"])
-		end
-		
-		sleep 1
-		
-		response = get_url('127.0.0.1',29998,'/hello')
-		assert_equal("hello!\n",response.body)
-		
-		response = get_url('127.0.0.1',29998,'/dir')
-		assert_equal("<html><head><title>Directory Listing",response.body[0..35])
-		
-		ab = `which ab`.chomp
-		unless ab == ''
-			puts "\nThreaded Mongrel..."
-			rt = `#{ab} -n 10000 -c 25 http://127.0.0.1:29997/hello`
-			rt =~ /^(Requests per second.*)$/
-			rts = $1
-			puts "\nEvented Mongrel..."
-			re = `#{ab} -n 10000 -c 25 http://127.0.0.1:29998/hello`
-			re =~ /^(Requests per second.*)$/
-			res = $1
-			puts "\nThreaded Mongrel, no proxies, concurrency of 25\n#{rts}"
-			puts "Evented Mongrel, no proxies, concurrency of 25\n#{res}"
-			sleep 1
-		end
-	end
-	
 	def test_swiftiplied_mongrel
 		puts "\nTesting Swiftiplied Mongrel"
 
@@ -801,6 +871,9 @@ ECONF
 			sleep 1
 		end
 		
+		response = httpclient('127.0.0.1',29998,"http://127.0.0.1",'')
+		assert(response[:headers].any? {|x| x =~ /404\s+not\s+found/i})
+
 		response = get_url('127.0.0.1',29998,'/hello')
 		assert_equal("hello!\n",response.body)
 		
@@ -810,67 +883,10 @@ ECONF
 		ab = `which ab`.chomp
 		unless ab == ''
 			#r = `#{ab} -n 10000 -c 250 http://127.0.0.1:29998/hello`
-			r = `#{ab} -n 100000 -c 25 http://127.0.0.1:29998/hello`
+			r = `#{ab} -n 100000 -k -c 25 http://127.0.0.1:29998/hello`
 			r =~ /^(Requests per second.*)$/
 			puts "Swiftiply -> Swiftiplied Mongrel, concurrency of 25\n#{$1}"
 		end
-	end
-	
-	def test_HUP
-		puts "\nTesting HUP handling"
-		dc = File.join(Dir.pwd,'TC_Swiftiply')
-		dr = File.join(dc,'test_serve_static_file')
-		
-		conf_file = File.join(dc,'test_HUP.conf')
-		File.open(conf_file,'w+') do |fh|
-			conf = YAML.load(ConfBase.to_yaml)
-			conf['map'].first.delete('docroot')
-			fh.write conf.to_yaml
-		end
-
-		DeleteQueue << conf_file
-		
-		smallfile_name = "xyzzy"
-		smallfile_path = File.join(dr,smallfile_name)
-		File.open(smallfile_path,'w') {|fh| fh.puts "alfalfa leafcutter bee"}
-		DeleteQueue << smallfile_path
-		
-		swiftiply_pid = nil
-		assert_nothing_raised("setup failed") do
-			KillQueue << swiftiply_pid = SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
-				:cmd => ["#{Ruby} -I../../src ../../bin/swiftiply -c test_HUP.conf"])
-			KillQueue << SwiftcoreTestSupport::create_process(:dir => 'TC_Swiftiply',
-				:cmd => ["#{Ruby} -I../../src ../bin/echo_client 127.0.0.1:29999"])
-			sleep 1
-		end
-
-		# Normal request for a sanity check.
-		response = get_url('127.0.0.1',29998,'/xyzzy')
-		assert_equal("GET /xyzzy HTTP/1.1\r\nAccept: */*\r\nHost: 127.0.0.1:29998\r\n\r\n",response.body)
-		
-		# Now rewrite the conf file to be a little different.
-		File.open(conf_file,'w+') {|fh| fh.write ConfBase.to_yaml }
-		
-		# Reload the config
-		Process.kill 'SIGHUP',swiftiply_pid
-		
-		# This request should pull the file from the docroot, since it the
-		# docroot was not deleted from the config that was just read.
-		response = get_url('127.0.0.1',29998,'/xyzzy')
-		assert_equal("alfalfa leafcutter bee\n",response.body)
-		
-		# Reload the config again, just to make sure we can do it twice;
-		# there was a bug reported about Swiftiply dying after the second HUP,
-		# so we want to make sure we are covered, here.
-		
-		Process.kill 'SIGHUP',swiftiply_pid
-		response = get_url('127.0.0.1',29998,'/xyzzy')
-		assert_equal("alfalfa leafcutter bee\n",response.body,"Swiftiply failure on second HUP.")
-		
-		# And because we're the suspicious types, let's do it a third tim, just to cover the bases.
-		Process.kill 'SIGHUP',swiftiply_pid
-		response = get_url('127.0.0.1',29998,'/xyzzy')
-		assert_equal("alfalfa leafcutter bee\n",response.body,"Swiftiply failure on second HUP.")
 	end
 	
 end

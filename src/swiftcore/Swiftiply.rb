@@ -423,11 +423,7 @@ module Swiftcore
 				# data per second for large files, and does 8000+ to 9000+
 				# requests per second with small files (i.e. under 4k).  I think
 				# this can still be improved upon for small files.
-				#
-				# TODO: Add support for logging static file delivery if wanted.
-				#   The ideal logging would probably be to Analogger since it'd
-				#   limit the performance impact of the the logging.
-				#
+				# This code is damn ugly.
 				
 				def serve_static_file(clnt,dr = nil)
 					request_method = clnt.request_method
@@ -448,7 +444,7 @@ module Swiftcore
 						# Connection: Keep-Alive
 						#
 						# should be sent.  This should probably be a param on the client.
-						
+
 						if data = fc[path_info]
 							none_match = clnt.none_match
 							same_response = case
@@ -458,18 +454,18 @@ module Swiftcore
 								else none_match
 								end	
 							if same_response
-								clnt.send_data(C_304 + @dateheader)
+								clnt.send_data "#{C_304}#{clnt.connection_header}#{@dateheader}"
 								oh = fc.owner_hash
 								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
 								#clnt.send_data data.last
 								#clnt.send_data data.first unless request_method == CHEAD
 								unless request_method == CHEAD
-									clnt.send_data "#{data.last}#{@dateheader}#{data.first}"
+									clnt.send_data "#{data.last}#{clnt.connection_header}#{@dateheader}#{data.first}"
 									oh = fc.owner_hash
 									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 200 #{data.first.length}") if level(oh) > 1
 								else
-									clnt.send_data(data.last + @dateheader)
+									clnt.send_data "#{data.last}#{clnt.connection_header}#{@dateheader}"
 									oh = fc.owner_hash
 									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"HEAD #{path_info} HTTP/#{clnt.http_version}\" 200 -") if level(oh) > 1
 								end
@@ -480,7 +476,8 @@ module Swiftcore
 							#TODO: There is a race condition here between when we detect whether the file is there, and when we start to deliver it.
 							#  It'd be nice to handle an exception when trying to read the file in a graceful way, by falling out as if no static
 							#  file had been found.  That way, if the file is deleted between detection and the start of delivery, such as might
-							#  happen when delivering files out of some sort of page cache, it can be handled in a reasonable manner.
+							#  happen when delivering files out of some sort of page cache, it can be handled in a reasonable manner.  This should
+							#  be easily doable, so DO IT SOON!
 							none_match = clnt.none_match
 							etag,mtime = @etag_cache_map[client_name].etag_mtime(path)
 							same_response = nil
@@ -500,12 +497,12 @@ module Swiftcore
 								ct = @typer.simple_type_for(path) || Caos 
 								fsize = File.size(path)
 
-								header_line = "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n"
+								header_line = "HTTP/1.1 200 OK\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n"
 
 								fd = nil
 								if fsize < @chunked_encoding_threshold
 									File.open(path) {|fh| fd = fh.sysread(fsize)}
-									clnt.send_data(header_line + @dateheader)
+									clnt.send_data "#{header_line}#{clnt.connection_header}#{@dateheader}"
 									unless request_method == CHEAD
 										if fsize < 32768
 											clnt.send_file_data path
@@ -515,11 +512,11 @@ module Swiftcore
 									end
 									clnt.close_connection_after_writing
 								elsif clnt.http_version != C1_0 && fsize > @chunked_encoding_threshold
-									clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n#{@dateheader}"
+									clnt.send_data "HTTP/1.1 200 OK\r\n#{clnt.connection_header}ETag: #{etag}\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n#{@dateheader}"
 									EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing} unless request_method == CHEAD
 								else
 									#clnt.send_data "HTTP/1.1 200 OK\r\nConnection: close\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n\r\n"
-									clnt.send_data header_line + @dateheader
+									clnt.send_data "#{header_line}#{clnt.connection_header}#{@dateheader}"
 									EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>false)) {clnt.close_connection_after_writing} unless request_method == CHEAD
 								end
 								
@@ -749,7 +746,7 @@ module Swiftcore
 			
 #			include Swiftcore::MicroParser
 
-			attr_accessor :create_time, :associate, :name, :redeployable, :data_pos, :data_len, :peer_ip, :uri
+			attr_accessor :create_time, :associate, :name, :redeployable, :data_pos, :data_len, :peer_ip, :uri, :connection_header
 
 			Crn = "\r\n".freeze
 			Crnrn = "\r\n\r\n".freeze
@@ -838,9 +835,7 @@ module Swiftcore
 								@name = $2.intern
 								@uri = C_slash if @uri.empty?
 								# Rewrite the request to get rid of the http://foo portion.
-								# It would be nice if this could be deferred until after the
-								# static file check; if a static file is going to be delivered
-								# by Swiftiply, this rewrite is unnecessary.
+								
 								data.sub!(/^\w+ +\w+:\/\/[^ \/]+([^ \?]*)/,"#{@request_method} #{@uri}")
 							end
 							@uri = @uri.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete(C_percent)].pack('H*')} if @uri.include?(C_percent)
@@ -895,7 +890,7 @@ module Swiftcore
 						# to the client.
 						
 						if @name
-							if ProxyBag.keepalive(@name)
+							unless ProxyBag.keepalive(@name) == false
 								if @http_version == C1_0
 									if data =~ /Connection: Keep-Alive/
 										# Nonstandard HTTP 1.0 situation; apply keepalive.
@@ -903,7 +898,7 @@ module Swiftcore
 										@connection_header = CConnection_KeepAlive
 									else
 										# Standard HTTP 1.0 situation; connection will be closed.
-										@connection_header = C_empty
+										@connection_header = CConnection_close
 									end
 								else
 									if data =~ /Connection: Close/
@@ -1237,8 +1232,7 @@ module Swiftcore
 		def self.run(config)
 			@existing_backends = {}
 			
-			# Default is to assume we want to try to turn epoll/kqueue support on.  EM
-			# ignores this on platforms that don't support it, so this is safe.
+			# Default is to assume we want to try to turn epoll/kqueue support on.			
 			EventMachine.epoll unless config.has_key?(Cepoll) and !config[Cepoll] rescue nil
 			EventMachine.kqueue unless config.has_key?(Ckqueue) and !config[Ckqueue] rescue nil
 			EventMachine.set_descriptor_table_size(config[Cepoll_descriptors] || config[Cdescriptors] || 4096) rescue nil
