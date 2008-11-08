@@ -470,7 +470,13 @@ module Swiftcore
 									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"HEAD #{path_info} HTTP/#{clnt.http_version}\" 200 -") if level(oh) > 1
 								end
 							end
-							clnt.close_connection_after_writing
+							# puts "#{clnt.connection_header} -- #{clnt.keepalive}"
+							unless clnt.keepalive
+								clnt.close_connection_after_writing
+							else
+								clnt.reset_state
+							end
+
 							true
 						elsif path = find_static_file(dr,path_info,client_name) # See if the static file that is wanted exists on the filesystem.
 							#TODO: There is a race condition here between when we detect whether the file is there, and when we start to deliver it.
@@ -489,15 +495,21 @@ module Swiftcore
 							end
 	
 							if same_response
-								clnt.send_data(C_304 + @dateheader)
-								clnt.close_connection_after_writing
+								clnt.send_data "#{C_304}#{clnt.connection_header}#{@dateheader}"
+								
+								unless clnt.keepalive
+									clnt.close_connection_after_writing
+								else
+									clnt.reset_state
+								end
+								
 								oh = fc.owner_hash
 								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
 								ct = @typer.simple_type_for(path) || Caos 
 								fsize = File.size(path)
 
-								header_line = "HTTP/1.1 200 OK\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n"
+								header_line = "HTTP/#{clnt.http_version} 200 OK\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n"
 
 								fd = nil
 								if fsize < @chunked_encoding_threshold
@@ -510,7 +522,15 @@ module Swiftcore
 											clnt.send_data fd
 										end
 									end
-									clnt.close_connection_after_writing
+									
+
+									unless clnt.keepalive
+										clnt.close_connection_after_writing
+									else
+										clnt.reset_state
+									end
+									
+
 								elsif clnt.http_version != C1_0 && fsize > @chunked_encoding_threshold
 									clnt.send_data "HTTP/1.1 200 OK\r\n#{clnt.connection_header}ETag: #{etag}\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n#{@dateheader}"
 									EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing} unless request_method == CHEAD
@@ -746,7 +766,7 @@ module Swiftcore
 			
 #			include Swiftcore::MicroParser
 
-			attr_accessor :create_time, :associate, :name, :redeployable, :data_pos, :data_len, :peer_ip, :uri, :connection_header
+			attr_accessor :create_time, :associate, :name, :redeployable, :data_pos, :data_len, :peer_ip, :uri, :connection_header, :keepalive
 
 			Crn = "\r\n".freeze
 			Crnrn = "\r\n\r\n".freeze
@@ -840,7 +860,6 @@ module Swiftcore
 							end
 							@uri = @uri.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete(C_percent)].pack('H*')} if @uri.include?(C_percent)
 						else
-							puts data
 							send_400_response
 							return
 						end
