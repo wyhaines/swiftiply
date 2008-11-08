@@ -87,7 +87,8 @@ module Swiftcore
 		C_slashindex_html = '/index.html'.freeze
 		C1_0 = '1.0'.freeze
 		C1_1 = '1.1'.freeze
-		C_304 = "HTTP/1.1 304 Not Modified\r\n".freeze
+		C_304_1 = "HTTP/1.1 304 Not Modified\r\n".freeze
+		C_304_0 = "HTTP/1.0 304 Not Modified\r\n".freeze
 		Caos = 'application/octet-stream'.freeze
 		Cat = 'at'.freeze
 		Ccache_directory = 'cache_directory'.freeze
@@ -454,7 +455,7 @@ module Swiftcore
 								else none_match
 								end	
 							if same_response
-								clnt.send_data "#{C_304}#{clnt.connection_header}#{@dateheader}"
+								clnt.send_data clnt.http_1_0 ? "#{C_304_0}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}" : "#{C_304_1}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}"
 								oh = fc.owner_hash
 								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
@@ -495,7 +496,7 @@ module Swiftcore
 							end
 	
 							if same_response
-								clnt.send_data "#{C_304}#{clnt.connection_header}#{@dateheader}"
+								clnt.send_data clnt.http_1_0 ? "#{C_304}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}" : "#{C_304_1}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}"
 								
 								unless clnt.keepalive
 									clnt.close_connection_after_writing
@@ -522,14 +523,12 @@ module Swiftcore
 											clnt.send_data fd
 										end
 									end
-									
 
 									unless clnt.keepalive
 										clnt.close_connection_after_writing
 									else
 										clnt.reset_state
 									end
-									
 
 								elsif clnt.http_version != C1_0 && fsize > @chunked_encoding_threshold
 									clnt.send_data "HTTP/1.1 200 OK\r\n#{clnt.connection_header}ETag: #{etag}\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n#{@dateheader}"
@@ -1049,6 +1048,7 @@ module Swiftcore
 			def uri; @uri; end
 			def request_method; @request_method; end
 			def http_version; @http_version; end
+			def http_1_0; @http_version == C1_0;end
 			def none_match; @none_match; end
 
 			def setup_for_redeployment
