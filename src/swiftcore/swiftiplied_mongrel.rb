@@ -115,6 +115,11 @@ module Mongrel
 		# a key.  If someone want to donate any patches.  Otherwise, this won't
 		# really be useful to most people until 0.7.0.
 		
+		CCONNECTION = 'CONNECTION'.freeze
+		CHTTP_VERSION = 'HTTP_VERSION'.freeze
+		CKEEP_ALIVE = 'KEEP_ALIVE'.freeze
+		C1_1 = '1.1'.freeze
+		
 		def initialize(host, port, num_processors=950, x=0, y=nil,key='') # Deal with Mongrel 1.0.1 or earlier, as well as later.
 			@socket = nil
 			@classifier = URIClassifier.new
@@ -162,8 +167,15 @@ module Mongrel
 				notifiers = handlers.select { |h| h.request_notify }
 				request = HttpRequest.new(params, linebuffer, notifiers)
 
+				http_version = params[CHTTP_VERSION]
+				if http_version == C1_1
+					keep_alive = params[CCONNECTION] =~ /close/i ? false : true
+				else
+					keep_alive = params[CCONNECTION] =~ /alive/i ? true : false
+				end
+				
 				# request is good so far, continue processing the response
-				response = HttpResponse.new(client)
+				response = HttpResponse.new(client,http_version,keep_alive)
 
 				# Process each handler in registered order until we run out or one finalizes the response.
 				dispatch_to_handlers(handlers,request,response)
@@ -204,6 +216,23 @@ module Mongrel
 
 	class HttpResponse
 		
+		CContentLength = 'Content-Length'.freeze
+		C1_1 = '1.1'.freeze
+		
+		def initialize(socket,http_version = C1_1, keepalive = false)
+			@socket = socket
+			@body = StringIO.new
+			@status = 404
+			@reason = nil
+			@header = HeaderOut.new(StringIO.new)
+			@header[Const::DATE] = Time.now.httpdate
+			@body_sent = false
+			@header_sent = false
+			@status_sent = false
+			@http_version = http_version
+			@keepalive = keepalive
+		end
+		
 		def send_file(path, small_file = false)
 			File.open(path, "rb") do |f|
 				while chunk = f.read(Const::CHUNK_SIZE) and chunk.length > 0
@@ -215,6 +244,16 @@ module Mongrel
 				end
 			end
 			@body_sent = true
+		end
+
+		def send_status(content_length=@body.length)
+			unless @status_sent
+				@header[CContentLength] = content_length if content_length && @status != 304
+				if @http_version == C1_1
+				end
+				write("HTTP/1.1 #{@status} #{@reason || HTTP_STATUS_CODES[@status]}\r\n")
+				@status_sent = true
+			end
 		end
 
 		def write(data)

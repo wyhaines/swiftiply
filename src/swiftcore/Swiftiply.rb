@@ -87,8 +87,7 @@ module Swiftcore
 		C_slashindex_html = '/index.html'.freeze
 		C1_0 = '1.0'.freeze
 		C1_1 = '1.1'.freeze
-		C_304_1 = "HTTP/1.1 304 Not Modified\r\n".freeze
-		C_304_0 = "HTTP/1.0 304 Not Modified\r\n".freeze
+		C_304 = "HTTP/1.1 304 Not Modified\r\n".freeze
 		Caos = 'application/octet-stream'.freeze
 		Cat = 'at'.freeze
 		Ccache_directory = 'cache_directory'.freeze
@@ -157,10 +156,14 @@ module Swiftcore
 		# them, if necessary.
 
 		class ProxyBag
+			
+			attr_reader :keepalive_queue
+			
 			@client_q = Hash.new {|h,k| h[k] = Deque.new}
 			#@client_q = Hash.new {|h,k| h[k] = []}
 			@server_q = Hash.new {|h,k| h[k] = Deque.new}
 			#@server_q = Hash.new {|h,k| h[k] = []}
+			@keepalive_q = Deque.new
 			@logger = nil
 			@ctime = Time.now
 			@dateheader = "Date: #{@ctime.httpdate}\r\n\r\n"
@@ -424,6 +427,7 @@ module Swiftcore
 				# data per second for large files, and does 8000+ to 9000+
 				# requests per second with small files (i.e. under 4k).  I think
 				# this can still be improved upon for small files.
+				#
 				# This code is damn ugly.
 				
 				def serve_static_file(clnt,dr = nil)
@@ -455,7 +459,7 @@ module Swiftcore
 								else none_match
 								end	
 							if same_response
-								clnt.send_data clnt.http_1_0 ? "#{C_304_0}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}" : "#{C_304_1}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}"
+								clnt.send_data "#{C_304}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}"
 								oh = fc.owner_hash
 								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
@@ -496,7 +500,7 @@ module Swiftcore
 							end
 	
 							if same_response
-								clnt.send_data clnt.http_1_0 ? "#{C_304}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}" : "#{C_304_1}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}"
+								clnt.send_data "#{C_304}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}"
 								
 								unless clnt.keepalive
 									clnt.close_connection_after_writing
@@ -510,7 +514,7 @@ module Swiftcore
 								ct = @typer.simple_type_for(path) || Caos 
 								fsize = File.size(path)
 
-								header_line = "HTTP/#{clnt.http_version} 200 OK\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n"
+								header_line = "HTTP/1.1 200 OK\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n"
 
 								fd = nil
 								if fsize < @chunked_encoding_threshold
@@ -608,13 +612,11 @@ module Swiftcore
 						data_q.unshift data
 						unless match_client_to_server_now(clnt)
 							if clnt.uri =~ /\w+-\w+-\w+\.\w+\.[\w\.]+-(\w+)?$/
-							#if $&
 								@demanding_clients[$1].unshift clnt
 							else
 								@client_q[@incoming_map[name]].unshift(clnt)
 							end
 						end
-						#clnt.push ## wasted call, yes?
 					end
 				end
 				
@@ -760,21 +762,19 @@ module Swiftcore
 		# to communicate between Swiftiply and the web browser clients.
 
 		class ClusterProtocol < EventMachine::Connection
-			# TODO: Support HTTP Keep-Alive connections.  This should massively
-			# improve the performance on static files.
 			
 #			include Swiftcore::MicroParser
 
-			attr_accessor :create_time, :associate, :name, :redeployable, :data_pos, :data_len, :peer_ip, :uri, :connection_header, :keepalive
+			attr_accessor :create_time, :last_action_time, :uri, :associate, :name, :redeployable, :data_pos, :data_len, :peer_ip, :connection_header, :keepalive
 
 			Crn = "\r\n".freeze
 			Crnrn = "\r\n\r\n".freeze
 			C_blank = ''.freeze
 			C_percent = '%'.freeze
 			Cunknown_host = 'unknown host'.freeze
-			C503Header = "HTTP/1.0 503 Server Unavailable\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
-			C404Header = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
-			C400Header = "HTTP/1.0 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
+			C503Header = "HTTP/1.1 503 Server Unavailable\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
+			C404Header = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
+			C400Header = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
 
 			# Initialize the @data array, which is the temporary storage for blocks
 			# of data received from the web browser client, then invoke the superclass
@@ -784,16 +784,18 @@ module Swiftcore
 				@data = Deque.new
 				#@data = []
 				@data_pos = 0
-				@connection_header = CConnection_close
-				@hmp = @name = @uri = @http_version = @request_method = @none_match = @done_parsing = @keepalive = nil
+				@connection_header = C_empty
+				@hmp = @name = @uri = @http_version = @request_method = @none_match = @done_parsing = nil
+				@keepalive = true
 				super
 			end
 
 			def reset_state
 				@data.clear
 				@data_pos = 0
-				@connection_header = CConnection_close
-				@hmp = @name = @uri = @http_version = @request_method = @none_match = @done_parsing = @keepalive = nil
+				@connection_header = C_empty
+				@hmp = @name = @uri = @http_version = @request_method = @none_match = @done_parsing = nil
+				@keepalive = true
 			end
 			
 			# States:
@@ -910,21 +912,18 @@ module Swiftcore
 						if @name
 							unless ProxyBag.keepalive(@name) == false
 								if @http_version == C1_0
-									if data =~ /Connection: Keep-Alive/
-										# Nonstandard HTTP 1.0 situation; apply keepalive.
-										@keepalive = true
+									if data =~ /Connection: Keep-Alive/i
+										# Nonstandard HTTP 1.0 situation; apply keepalive header.
 										@connection_header = CConnection_KeepAlive
 									else
 										# Standard HTTP 1.0 situation; connection will be closed.
+										@keepalive = false
 										@connection_header = CConnection_close
 									end
-								else
-									if data =~ /Connection: Close/
+								else # The connection is an HTTP 1.1 connection.
+									if data =~ /Connection: [Cc]lose/
 										# Nonstandard HTTP 1.1 situation; connection will be closed.
-									else
-										# Standard HTTP 1.1 situation; apply keepalive.
-										@connection_header = C_empty
-										@keepalive = true
+										@keepalive = false
 									end
 								end
 							end
@@ -1045,10 +1044,8 @@ module Swiftcore
 				ProxyBag.remove_client(self) unless @associate
 			end
 
-			def uri; @uri; end
 			def request_method; @request_method; end
 			def http_version; @http_version; end
-			def http_1_0; @http_version == C1_0;end
 			def none_match; @none_match; end
 
 			def setup_for_redeployment
@@ -1117,6 +1114,8 @@ module Swiftcore
 						ProxyBag.add_id(self,@id)
 						@initialized = true
 					else
+						# The worker that connected did not present the proper authentication,
+						# so something is fishy; time to cut bait.
 						close_connection
 						return
 					end
@@ -1158,6 +1157,18 @@ module Swiftcore
 						else
 							@associate.send_data @headers + Crnrn
 						end
+						
+						# If keepalive is turned on, the assumption is that it will stay
+						# on, unless the headers being returned indicate that the connection
+						# should be closed.
+						# So, check for a 'Connection: Closed' header.
+						if keepalive = @associate.keepalive
+							keepalive = false if @headers =~ /Connection: [Cc]lose/
+							if @associate_http_version == C1_0
+								keepalive = false unless @headers == /Connection: Keep-Alive/i
+							end
+
+						end
 					else
 						@headers << data
 					end
@@ -1168,7 +1179,15 @@ module Swiftcore
 					@content_sent += data.length
 					if @content_length and @content_sent >= @content_length or data[-6..-1] == C0rnrn
 						# If @dont_send_data is set, then the connection is going to be closed elsewhere.
-						@associate.close_connection_after_writing unless @dont_send_data
+						unless @dont_send_data
+							# Check to see if keepalive is enabled.
+							if keepalive
+								@associate.reset_state
+								ProxyBag.remove_client(self) unless @associate
+							else
+								@associate.close_connection_after_writing
+							end
+						end
 						@associate = @headers_completed = @dont_send_data = nil
 						@headers = ''
 						#@headers_completed = false
