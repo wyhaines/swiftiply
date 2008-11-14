@@ -115,7 +115,7 @@ module Mongrel
 		# a key.  If someone want to donate any patches.  Otherwise, this won't
 		# really be useful to most people until 0.7.0.
 		
-		CCONNECTION = 'CONNECTION'.freeze
+		CHTTP_CONNECTION = 'HTTP_CONNECTION'.freeze
 		CHTTP_VERSION = 'HTTP_VERSION'.freeze
 		CKEEP_ALIVE = 'KEEP_ALIVE'.freeze
 		C1_1 = '1.1'.freeze
@@ -169,9 +169,9 @@ module Mongrel
 
 				http_version = params[CHTTP_VERSION]
 				if http_version == C1_1
-					keep_alive = params[CCONNECTION] =~ /close/i ? false : true
+					keep_alive = params[CHTTP_CONNECTION] =~ /close/i ? false : true
 				else
-					keep_alive = params[CCONNECTION] =~ /alive/i ? true : false
+					keep_alive = params[CHTTP_CONNECTION] =~ /alive/i ? true : false
 				end
 				
 				# request is good so far, continue processing the response
@@ -249,9 +249,11 @@ module Mongrel
 		def send_status(content_length=@body.length)
 			unless @status_sent
 				@header[CContentLength] = content_length if content_length && @status != 304
-				if @http_version == C1_1
+				if @keepalive
+					write("HTTP/1.1 #{@status} #{@reason || HTTP_STATUS_CODES[@status]}\r\nConnection: Keep-Alive\r\n")
+				else
+					write("HTTP/1.1 #{@status} #{@reason || HTTP_STATUS_CODES[@status]}\r\nConnection: Close\r\n")
 				end
-				write("HTTP/1.1 #{@status} #{@reason || HTTP_STATUS_CODES[@status]}\r\n")
 				@status_sent = true
 			end
 		end
