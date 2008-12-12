@@ -144,6 +144,8 @@ module Mongrel
 				notifiers = handlers.select { |h| h.request_notify }
 				request = HttpRequest.new(params, linebuffer, notifiers)
 
+				# TODO: Add Keep-Alive support
+
 				# request is good so far, continue processing the response
 				response = HttpResponse.new(client)
 

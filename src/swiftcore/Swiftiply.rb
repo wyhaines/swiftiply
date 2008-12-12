@@ -189,8 +189,6 @@ module Swiftcore
 			# Kids, don't do this at home.  It's gross.
 			@typer = MIME::Types.instance_variable_get('@__types__')
 
-			@dcnt = 0
-
 			MockLog = Swiftcore::Swiftiply::MockLog.new
 			
 			class << self
@@ -463,8 +461,6 @@ module Swiftcore
 								oh = fc.owner_hash
 								log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(oh) > 1
 							else
-								#clnt.send_data data.last
-								#clnt.send_data data.first unless request_method == CHEAD
 								unless request_method == CHEAD
 									clnt.send_data "#{data.last}#{clnt.connection_header}#{@dateheader}#{data.first}"
 									oh = fc.owner_hash
@@ -475,7 +471,7 @@ module Swiftcore
 									log(oh).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"HEAD #{path_info} HTTP/#{clnt.http_version}\" 200 -") if level(oh) > 1
 								end
 							end
-							# puts "#{clnt.connection_header} -- #{clnt.keepalive}"
+
 							unless clnt.keepalive
 								clnt.close_connection_after_writing
 							else
@@ -590,7 +586,7 @@ module Swiftcore
 					name = clnt.name
 					drm = @dynamic_request_map[name]
 					if drm[uri] || !(@docroot_map.has_key?(name) && serve_static_file(clnt))
-						# It takes two requests to add it to the verification
+						# It takes two requests to add it to the dynamic verification
 						# queue. So, go from nil to false, then from false to
 						# insertion into the queue.
 						unless drmval = drm[uri]
@@ -665,9 +661,6 @@ module Swiftcore
 				# server.
 
 				def match_client_to_server_now(client)
-					# To allow filtering to different outgoing locations, by
-					# url, there needs to be some potential logic here.
-					# maybe:
 					hash = @incoming_map[client.name]
 					
 					if outgoing_filters = @filters[hash]
@@ -726,7 +719,7 @@ module Swiftcore
 				# have been waiting longer than @server_unavailable_timeout
 				# seconds.  Clients which are expired will receive a 503
 				# response.  If this is happening, either you need more
-				# backend processes, or you @server_unavailable_timeout is
+				# backend processes, or your @server_unavailable_timeout is
 				# too short.
 
 				def expire_clients
@@ -749,10 +742,6 @@ module Swiftcore
 				def update_ctime
 					@ctime = Time.now
 					@dateheader = "Date: #{@ctime.httpdate}\r\n\r\n"
-				end
-
-				def dcnt
-					@dcnt += 1
 				end
 
 			end
@@ -935,42 +924,6 @@ module Swiftcore
 					else
 						@data.unshift data
 					end
-
-
-					# Note the \0 below.  intern() blows up when passed a \0.  People who are trying to break a server like to pass \0s.  This should cope with that.
-#					if data =~ /^Host:\s*([^\r\0:]+)/
-#						# Still wondering whether it is worth it to use intern here.
-#						@name = $1.intern
-#						@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
-#					elsif data =~ /\r\n\r\n/
-#						@name = ProxyBag.default_name
-#					end
-#					unless @uri
-#						data =~ /^(\w+)\s+([^\s\?]+).*(1.\d)/
-#						@uri = $2
-#						@http_version = $3
-#						@request_method = $1
-#						@uri = @uri.to_s.tr('+', ' ').gsub(/((?:%[0-9a-fA-F]{2})+)/n) {[$1.delete('%')].pack('H*')} if @uri =~ /%/
-#					end
-#					ProxyBag.add_frontend_client(self,@data,data)
-
-#					r = consume_data(data)
-#
-#					close_connection unless r
-#					if @_http_parsed
-#						if @http_host
-#							@name = @http_host.intern
-#							@uri = @http_request_uri
-#							@name = ProxyBag.default_name unless ProxyBag.incoming_mapping(@name)
-#							ProxyBag.add_frontend_client(self,@data,data)
-#						else
-#							@name = ProxyBag.default_name
-#							@uri = @http_request_uri
-#							ProxyBag.add_frontend_client(self,@data,data)
-#						end
-#					else
-#						@data.unshift data
-#					end
 				end
 			end
 			
@@ -980,7 +933,7 @@ module Swiftcore
 				ip = Socket::unpack_sockaddr_in(get_peername).last rescue Cunknown_host
 				error = "The request received on #{ProxyBag.now.asctime} from #{ip} was malformed and could not be serviced."
 				send_data "#{C400Header}Bad Request\n\n#{error}"
-				ProxyBag.logger.log('info',"Bad Request -- #{error}")
+				ProxyBag.logger.log(Cinfo,"Bad Request -- #{error}")
 				close_connection_after_writing
 			end
 
@@ -991,7 +944,7 @@ module Swiftcore
 				ip = Socket::unpack_sockaddr_in(get_peername).last rescue Cunknown_host
 				error = "The request (#{@uri} --> #{@name}), received on #{ProxyBag.now.asctime} from #{ip} did not match any resource know to this server."
 				send_data "#{C404Header}Resource not found.\n\n#{error}"
-				ProxyBag.logger.log('info',"Resource not found -- #{error}")
+				ProxyBag.logger.log(Cinfo,"Resource not found -- #{error}")
 				close_connection_after_writing
 			end
 	
@@ -1002,7 +955,7 @@ module Swiftcore
 				ip = Socket::unpack_sockaddr_in(get_peername).last rescue Cunknown_host
 				error = "The request (#{@uri} --> #{@name}), received on #{create_time.asctime} from #{ip} timed out before being deployed to a server for processing."
 				send_data "#{C503Header}Server Unavailable\n\n#{error}"
-				ProxyBag.logger.log('info',"Server Unavailable -- #{error}")
+				ProxyBag.logger.log(Cinfo,"Server Unavailable -- #{error}")
 				close_connection_after_writing
 			end
 	
@@ -1347,14 +1300,14 @@ def post_init
 	start_tls({:cert_chain_file => "#{ssl_addresses[addrport][Ccertfile]}", :private_key_file => "#{ssl_addresses[addrport][Ckeyfile]}"})
 end
 EOC
-									ProxyBag.logger.log('info',"Opening SSL server on #{address}:#{port}") if log_level > 0 and log_level < 3
-									ProxyBag.logger.log('info',"Opening SSL server on #{address}:#{port} using key at #{ssl_addresses[addrport][Ckeyfile]} and certificate at #{ssl_addresses[addrport][Ccertfile]}")
+									ProxyBag.logger.log(Cinfo,"Opening SSL server on #{address}:#{port}") if log_level > 0 and log_level < 3
+									ProxyBag.logger.log(Cinfo,"Opening SSL server on #{address}:#{port} using key at #{ssl_addresses[addrport][Ckeyfile]} and certificate at #{ssl_addresses[addrport][Ccertfile]}")
 									new_config[Ccluster_server][addrport] = EventMachine.start_server(
 									address,
 									port,
 									ssl_protocol)
 							else
-								ProxyBag.logger.log('info',"Opening server on #{address}:#{port}") if ProxyBag.log_level > 0
+								ProxyBag.logger.log(Cinfo,"Opening server on #{address}:#{port}") if ProxyBag.log_level > 0
 								new_config[Ccluster_server][addrport] = EventMachine.start_server(
 									address,
 									port,
@@ -1386,7 +1339,7 @@ EOC
 			# Stop anything that is no longer in the config.
 			if RunningConfig.has_key?(Ccluster_server)
 				(RunningConfig[Ccluster_server].keys - addrports).each do |s|
-					ProxyBag.logger.log('info',"Stopping unused incoming server #{s.inspect} out of #{RunningConfig[Ccluster_server].keys.inspect - RunningConfig[Ccluster_server].keys.inspect}")
+					ProxyBag.logger.log(Cinfo,"Stopping unused incoming server #{s.inspect} out of #{RunningConfig[Ccluster_server].keys.inspect - RunningConfig[Ccluster_server].keys.inspect}")
 					EventMachine.stop_server(s)
 				end
 			end
@@ -1478,7 +1431,7 @@ EOC
 					
 					new_config[Cincoming] = {}
 					m[Cincoming].each do |p_|
-						ProxyBag.logger.log('info',"Configuring incoming #{p_}") if log_level > 1
+						ProxyBag.logger.log(Cinfo,"Configuring incoming #{p_}") if log_level > 1
 						p = p_.intern
 						
 						# The dynamic request cache may need to know a valid client name.
@@ -1587,11 +1540,11 @@ EOC
 								filter = nil
 							end
 							
-							ProxyBag.logger.log('info',"  Configuring outgoing #{out}") if log_level > 2
+							ProxyBag.logger.log(Cinfo,"  Configuring outgoing #{out}") if log_level > 2
 							ProxyBag.default_name = p if m[Cdefault]
 							
 							if @existing_backends.has_key?(out)
-								ProxyBag.logger.log('info','    Already running; skipping') if log_level > 2
+								ProxyBag.logger.log(Cinfo,'    Already running; skipping') if log_level > 2
 								new_config[Coutgoing][out] ||= RunningConfig[Coutgoing][out]
 								next
 							else
@@ -1599,9 +1552,9 @@ EOC
 								@existing_backends[out] = true
 								backend_class = Class.new(BackendProtocol)
 								backend_class.bname = hash
-								ProxyBag.logger.log('info',"    Permit X-Sendfile") if permit_xsendfile and log_level > 2
+								ProxyBag.logger.log(Cinfo,"    Permit X-Sendfile") if permit_xsendfile and log_level > 2
 								backend_class.xsendfile = permit_xsendfile
-								ProxyBag.logger.log('info',"    Enable 404 on missing Sendfile resource") if m[Cenable_sendfile_404] and log_level > 2
+								ProxyBag.logger.log(Cinfo,"    Enable 404 on missing Sendfile resource") if m[Cenable_sendfile_404] and log_level > 2
 								backend_class.enable_sendfile_404 = true if m[Cenable_sendfile_404]								
 								backend_class.filter = !filter.nil?
 								ProxyBag.add_filter(filter,hash)
@@ -1732,7 +1685,7 @@ EOC
 					log_class = get_const_from_name(type,::Swiftcore::Swiftiply::Loggers)
 			
 					new_logger[:logger] = log_class.new(lgcfg)
-					new_logger[:logger].log('info',"Logger type #{type} started; log level is #{new_logger[:log_level]}.") if new_logger[:log_level] > 0
+					new_logger[:logger].log(Cinfo,"Logger type #{type} started; log level is #{new_logger[:log_level]}.") if new_logger[:log_level] > 0
 				rescue NameError
 					raise SwiftiplyLoggerNameError.new("The logger class specified, Swiftcore::Swiftiply::Loggers::#{type} was not defined.")
 				end
