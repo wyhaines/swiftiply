@@ -7,17 +7,41 @@ module Swiftcore
 	#   accessed through a separate stats port via a RESTful HTTP request which
 	#   identifies the section to pull stats for, and the authentication key for
 	#   access to those stats.
+	#   http://127.0.0.1:8082
+	#
+	# To track:
+	#   Total connections
+	#   400s served
+	#   404s served
+	#
+	#   Per config section:
+	#     backends connected
+	#     backends busy
+	#     backend disconnects
+	#     backend errors
+	#     static bytes served
+	#     static requests handled
+	#     static requests 304'd
+	#     cache hits for static files
+	#     dynamic bytes returned
+	#     dynamic requests handled
+	#     
+	#   
+	#
 	# 3) Maintenance Page Support
 	#   This is a path to a static file which will be returned on a 503 error.
 	# 4) GZip compression
 	#   Can be toggled on or off.  Configure mime types to compress.  Implemented
 	#   via an extension.
-	# 5) Keepalive
+	# 5) Make one "SwiftiplyCplusplus" and one "SwiftiplC" extension that,
+	#    respectively, encapsulate all of the C++ and C extensions into just
+	#    two.
 
 	# A little statemachine for loading requirements.  The intention is to
 	# only load rubygems if necessary, and to load the Deque and SplayTreeMap
 	# classes if they are available, setting a constant accordingly so that
 	# the fallbacks (Array and Hash) can be used if they are not.
+	
 	begin
 		load_state ||= :start
 		rubygems_loaded ||= false
@@ -437,16 +461,6 @@ module Swiftcore
 						client_name = clnt.name
 						dr ||= @docroot_map[client_name]
 						fc = @file_cache_map[client_name]
-						
-						# To support keepalive, there needs to be a way to detect whether
-						#
-						# Connection: close
-						#
-						# or
-						#
-						# Connection: Keep-Alive
-						#
-						# should be sent.  This should probably be a param on the client.
 
 						if data = fc[path_info]
 							none_match = clnt.none_match
@@ -764,7 +778,11 @@ module Swiftcore
 			C503Header = "HTTP/1.1 503 Server Unavailable\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
 			C404Header = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
 			C400Header = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
-
+			@count_connections = 0
+			@count_400s = 0
+			@count_404s = 0
+			@count_503s = 0
+			
 			# Initialize the @data array, which is the temporary storage for blocks
 			# of data received from the web browser client, then invoke the superclass
 			# initialization.
@@ -1120,7 +1138,6 @@ module Swiftcore
 							if @associate_http_version == C1_0
 								keepalive = false unless @headers == /Connection: Keep-Alive/i
 							end
-
 						end
 					else
 						@headers << data
