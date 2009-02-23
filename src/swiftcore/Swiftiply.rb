@@ -1259,32 +1259,13 @@ module Swiftcore
 			#File.open('/tmp/swprof','w+') {|fh| printer = printer.print(fh,0)}
 		end
 		
+		# TODO: This method is crazy long, and should be refactored.
 		def self.em_config(config)
 			new_config = {Ccluster_address => [],Ccluster_port => [],Ccluster_server => {}}
-
 			defaults = config['defaults'] || {}
 
-			if defaults['logger']
-				if config['logger']
-					config['logger'].rmerge!(defaults['logger'])
-				else
-					config['logger'] = {}.rmerge!(defaults['logger'])
-				end
-			else
-				config['logger'] = {'log_level' => 0, 'type' => 'stderror'} unless config['logger']
-			end
-
-			new_log = handle_logger_config(config['logger']) if config['logger']
-			ProxyBag.logger = new_log[:logger] if new_log
-			ProxyBag.log_level = log_level = new_log[:log_level] if new_log
-
-			ssl_addresses = {}
-			# Determine which address/port combos should be running SSL.
-			(config[Cssl] || []).each do |sa|
-				if sa.has_key?(Cat)
-					ssl_addresses[sa[Cat]] = {Ccertfile => sa[Ccertfile], Ckeyfile => sa[Ckeyfile]}
-				end
-			end
+			_config_loggers(config,defaults)
+			ssl_addresses = _config_determine_ssl_addresses(config)
 
 			addresses = (Array === config[Ccluster_address]) ? config[Ccluster_address] : [config[Ccluster_address]]
 			ports = (Array === config[Ccluster_port]) ? config[Ccluster_port] : [config[Ccluster_port]]
@@ -1633,6 +1614,32 @@ EOC
 			RunningConfig.replace new_config
 		end
 		
+		def _config_loggers(config,defaults)
+			if defaults['logger']
+				if config['logger']
+					config['logger'].rmerge!(defaults['logger'])
+				else
+					config['logger'] = {}.rmerge!(defaults['logger'])
+				end
+			else
+				config['logger'] = {'log_level' => 0, 'type' => 'stderror'} unless config['logger']
+			end
+			
+			new_log = handle_logger_config(config['logger']) if config['logger']
+			ProxyBag.logger = new_log[:logger] if new_log
+			ProxyBag.log_level = log_level = new_log[:log_level] if new_log
+		end
+		
+		def _config_determine_ssl_addresses(config)
+			ssl_addresses = {}
+			# Determine which address/port combos should be running SSL.
+			(config[Cssl] || []).each do |sa|
+				if sa.has_key?(Cat)
+					ssl_addresses[sa[Cat]] = {Ccertfile => sa[Ccertfile], Ckeyfile => sa[Ckeyfile]}
+				end
+			end
+			ssl_addresses
+		end
 		
 		# This can be used to change the effective user and group that
 		# Swiftiply is running as.
