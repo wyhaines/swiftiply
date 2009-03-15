@@ -855,7 +855,7 @@ module Swiftcore
 						#
 						# http://www.w3.org/Protocols/rfc2616/rfc2616-sec3.html#sec5.1.2
 						#
-						if data =~ /^(\w+) +(?:\w+:\/\/([^ \/]+))?([^ \?]*)\S* +HTTP\/(\d\.\d)/
+						if data =~ /^(\w+) +(?:\w+:\/\/([^ \/]+))?([^ \?\#]*)\S* +HTTP\/(\d\.\d)/
 							@request_method = $1
 							@uri = $3
 							@http_version = $4
@@ -1240,17 +1240,20 @@ module Swiftcore
 		def self.run(config)
 			@existing_backends = {}
 			
-			# Default is to assume we want to try to turn epoll/kqueue support on.			
-			EventMachine.epoll unless config.has_key?(Cepoll) and !config[Cepoll] rescue nil
-			EventMachine.kqueue unless config.has_key?(Ckqueue) and !config[Ckqueue] rescue nil
-			EventMachine.set_descriptor_table_size(config[Cepoll_descriptors] || config[Cdescriptors] || 4096) rescue nil
+			# Default is to assume we want to try to turn epoll/kqueue support on.
+			EventMachine.kqueue
+			#EventMachine.epoll unless config.has_key?(Cepoll) and !config[Cepoll] rescue nil
+			#EventMachine.kqueue unless config.has_key?(Ckqueue) and !config[Ckqueue] rescue nil
+			#EventMachine.set_descriptor_table_size(config[Cepoll_descriptors] || config[Cdescriptors] || 4096) rescue nil
 			
 			EventMachine.run do
+				EM.set_timer_quantum(5)
 				trap("HUP") {em_config(Swiftcore::SwiftiplyExec.parse_options); GC.start}
 				trap("INT") {EventMachine.stop_event_loop}
 				GC.start
 				em_config(config)
-				GC.start
+				GC.start # We just want to make sure all the junk created during
+				         # configuration is purged prior to real work starting.
 				#RubyProf.start
 			end
 			#result = RubyProf.stop
@@ -1264,7 +1267,8 @@ module Swiftcore
 			new_config = {Ccluster_address => [],Ccluster_port => [],Ccluster_server => {}}
 			defaults = config['defaults'] || {}
 
-			_config_loggers(config,defaults)
+			new_log = _config_loggers(config,defaults)
+			log_level = ProxyBag.log_level
 			ssl_addresses = _config_determine_ssl_addresses(config)
 
 			addresses = (Array === config[Ccluster_address]) ? config[Ccluster_address] : [config[Ccluster_address]]
@@ -1276,8 +1280,6 @@ module Swiftcore
 					addrport = "#{address}:#{port}"
 					addrports << addrport
 					
-					#if RunningConfig[Ccluster_address] != config[Ccluster_address] or RunningConfig[Ccluster_port] != config[Ccluster_port]
-					#if !RunningConfig[Ccluster_address].include?(address) or !RunningConfig[Ccluster_port].include?(port)
 					if (!RunningConfig.has_key?(Ccluster_address)) ||
 						(RunningConfig.has_key?(Ccluster_address) && !RunningConfig[Ccluster_address].include?(address)) ||
 						(RunningConfig.has_key?(Ccluster_port) && !RunningConfig[Ccluster_port].include?(port))
@@ -1614,7 +1616,7 @@ EOC
 			RunningConfig.replace new_config
 		end
 		
-		def _config_loggers(config,defaults)
+		def self._config_loggers(config,defaults)
 			if defaults['logger']
 				if config['logger']
 					config['logger'].rmerge!(defaults['logger'])
@@ -1627,10 +1629,11 @@ EOC
 			
 			new_log = handle_logger_config(config['logger']) if config['logger']
 			ProxyBag.logger = new_log[:logger] if new_log
-			ProxyBag.log_level = log_level = new_log[:log_level] if new_log
+			ProxyBag.log_level = new_log[:log_level] if new_log
+			new_log
 		end
 		
-		def _config_determine_ssl_addresses(config)
+		def self._config_determine_ssl_addresses(config)
 			ssl_addresses = {}
 			# Determine which address/port combos should be running SSL.
 			(config[Cssl] || []).each do |sa|

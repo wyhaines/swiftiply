@@ -121,6 +121,7 @@ module Mongrel
 				EventMachine.epoll
 				EventMachine.set_descriptor_table_size(4096)
 				EventMachine.run do
+					EM.set_timer_quantum(5)
 					begin
 						EventMachine.start_server(@host,@port.to_i,MongrelProtocol)
 					rescue StopServer
