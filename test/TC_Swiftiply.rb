@@ -245,11 +245,11 @@ ECONF
 		# Hit it a bunch of times.
 		
 		ab = `which ab`.chomp
-		unless ab == ''
-			r = `#{ab} -n 100000 -c 25 http://127.0.0.1:29998/#{smallfile_name}`
-			r =~ /^(Requests per second.*)$/
-			puts "10k 1020 byte files, concurrency of 25; no KeepAlive\n#{$1}\n"
-		end
+		#unless ab == ''
+		#	r = `#{ab} -n 100000 -c 2 http://127.0.0.1:29998/#{smallfile_name}`
+		#	r =~ /^(Requests per second.*)$/
+		#	puts "10k 1020 byte files, concurrency of 25; no KeepAlive\n#{$1}\n"
+		#end
 
 		unless ab == ''
 			r = `#{ab} -n 100000 -c 25 -k http://127.0.0.1:29998/#{smallfile_name}`
@@ -263,7 +263,7 @@ ECONF
 			puts "10k 1020 byte files with etag, concurrency of 25; with KeepAlive\n#{$1}\n"
 		end
 		unless ab == ''
-			r = `#{ab} -n 100000 -i -c 25 http://127.0.0.1:29998/#{smallfile_name}`
+			r = `#{ab} -n 10000 -i -c 25 http://127.0.0.1:29998/#{smallfile_name}`
 			r =~ /^(Requests per second.*)$/
 			puts "10k HEAD requests, concurrency of 25\n#{$1}\n"
 		end
@@ -884,7 +884,7 @@ ECONF
 		
 		ab = `which ab`.chomp
 		unless ab == ''
-			r = `#{ab} -n 100000 -c 25 http://127.0.0.1:29998/hello`
+			r = `#{ab} -n 10000 -c 25 http://127.0.0.1:29998/hello`
 			r =~ /^(Requests per second.*)$/
 			puts "Swiftiply -> Swiftiplied Mongrel, concurrency of 25\n#{$1}"
 		end

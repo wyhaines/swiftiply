@@ -144,6 +144,7 @@ module Mongrel
 			#@acceptor = Thread.new do
 			@acceptor = Thread.current
 				EventMachine.run do
+					EM.set_timer_quantum(5)
 					begin
 						MongrelProtocol.connect(@host,@port.to_i,@key)
 					rescue StopServer
