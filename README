@@ -1,3 +1,8 @@
+NOTE -- If you are here because you read the article that was just published on
+the Engine Yard blog that mentioned Swiftiply, the source that I ran those tests
+with is somewhat changed from what is here right now. I will update this repo
+with those sources by the end of the weekend (March 21st).
+
 Swiftiply v. 0.6.4  (http://swiftiply.swiftcore.org)
 
 Swiftiply is a backend agnostic clustering proxy for web applications that is
