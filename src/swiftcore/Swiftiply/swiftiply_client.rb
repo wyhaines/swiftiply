@@ -35,7 +35,8 @@ class SwiftiplyClientProtocol < EventMachine::Connection
 			conn.port = port
 			conn.key = key
 			ip = conn.ip = conn.__get_ip(hostname)
-			conn.id = 'swiftclient' << ip.collect {|x| sprintf('%02x',x.to_i)}.join << sprintf('%04x',port.to_i)<< sprintf('%02x',key.length) << key
+			#conn.id = 'swiftclient' << ip.collect {|x| sprintf('%02x',x.to_i)}.join << sprintf('%04x',port.to_i)<< sprintf('%02x',key.length) << key
+			conn.id = 'swiftclient' << ip.collect {|x| sprintf('%02x',x.to_i)}.join << sprintf('%04x',$$)<< sprintf('%02x',key.length) << key
 			conn.set_comm_inactivity_timeout inactivity_timeout
 		end
 	end
