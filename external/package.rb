@@ -36,9 +36,9 @@ end
 
 def self.config(name)
 	# XXX use pathname
-	prefix = Regexp.quote(Config::CONFIG["prefix"])
-	exec_prefix = Regexp.quote(Config::CONFIG["exec_prefix"])
-	Config::CONFIG[name].gsub(/\A\/?(#{prefix}|#{exec_prefix})\/?/, '')
+	prefix = Regexp.quote(RbConfig::CONFIG["prefix"])
+	exec_prefix = Regexp.quote(RbConfig::CONFIG["exec_prefix"])
+	RbConfig::CONFIG[name].gsub(/\A\/?(#{prefix}|#{exec_prefix})\/?/, '')
 end
 
 SITE_DIRS = {
@@ -70,7 +70,7 @@ MODES = {
 
 
 SETUP_OPTIONS = {:parse_cmdline => true, :load_conf => true, :run_tasks => true}
-RUBY_BIN = File.join(::Config::CONFIG['bindir'],::Config::CONFIG['ruby_install_name']) << ::Config::CONFIG['EXEEXT']
+RUBY_BIN = File.join(::RbConfig::CONFIG['bindir'],::RbConfig::CONFIG['ruby_install_name']) << ::RbConfig::CONFIG['EXEEXT']
 
 def self.setup(version, options = {}, &instructions)
 	prefixes = dirs = nil
@@ -197,9 +197,9 @@ module Actions
 						File.open(tmpfile, 'w', 0755) do |w|
 							first = r.gets
 							return unless SHEBANG_RE =~ first
-							ruby = File.join(::Config::CONFIG['bindir'],::Config::CONFIG['ruby_install_name'])
-							ruby << ::Config::CONFIG['EXEEXT']
-							#w.print first.sub(SHEBANG_RE, '#!' + Config::CONFIG['ruby-prog'])
+							ruby = File.join(::RbConfig::CONFIG['bindir'],::RbConfig::CONFIG['ruby_install_name'])
+							ruby << ::RbConfig::CONFIG['EXEEXT']
+							#w.print first.sub(SHEBANG_RE, '#!' + RbConfig::CONFIG['ruby-prog'])
 							w.print first.sub(SHEBANG_RE, '#!' + ruby)
 							w.write r.read
 						end
@@ -397,7 +397,7 @@ class PackageSpecification_1_0
 	end
 
 	def initialize(prefixes = nil, dirs = nil)
-		@prefix = Config::CONFIG["prefix"].gsub(/\A\//, '')
+		@prefix = RbConfig::CONFIG["prefix"].gsub(/\A\//, '')
 		@translate = {}
 		@prefixes = (prefixes || {}).dup
 		KINDS.each do |kind|
@@ -429,7 +429,7 @@ class PackageSpecification_1_0
 			__send__ kind, Dir["#{kind}/**/*"]
 		end
 		translate(:ext, "ext/*" => "", :inherit => true)
-		ext Dir["ext/**/*.#{Config::CONFIG['DLEXT']}"]
+		ext Dir["ext/**/*.#{RbConfig::CONFIG['DLEXT']}"]
 	end
 
 	# Builds any needed extensions.
@@ -668,5 +668,5 @@ end # module Package
 
 require 'rbconfig'
 def config(x)
-	Config::CONFIG[x]
+	RbConfig::CONFIG[x]
 end

@@ -117,8 +117,8 @@ module Swiftcore
 			
 			EventMachine.run do
 				EM.set_timer_quantum(5)
-				trap("HUP") {em_config(Swiftcore::SwiftiplyExec.parse_options); GC.start}
-				trap("INT") {EventMachine.stop_event_loop}
+				trap("HUP") { EM.add_timer(0) {em_config(Swiftcore::SwiftiplyExec.parse_options); GC.start} }
+				trap("INT") { EventMachine.stop_event_loop }
 				GC.start
 				em_config(config)
 				GC.start # We just want to make sure all the junk created during

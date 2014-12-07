@@ -8,7 +8,7 @@ require 'yaml'
 
 class TC_ProxyBag < Test::Unit::TestCase
 	@@testdir = SwiftcoreTestSupport.test_dir(__FILE__)
-	Ruby = File.join(::Config::CONFIG['bindir'],::Config::CONFIG['ruby_install_name']) << ::Config::CONFIG['EXEEXT']
+	Ruby = File.join(::RbConfig::CONFIG['bindir'],::RbConfig::CONFIG['ruby_install_name']) << ::RbConfig::CONFIG['EXEEXT']
 	
 	DeleteQueue = []
 	KillQueue = []

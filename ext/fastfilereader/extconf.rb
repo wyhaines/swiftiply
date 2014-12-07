@@ -126,8 +126,8 @@ when /linux/
   # You might think modifying CONFIG['LINK_SO'] would be a better way to do this,
   # but it doesn't work because mkmf doesn't look at CONFIG['LINK_SO'] again after
   # it initializes.
-  linkso = Object.send :remove_const, "LINK_SO"
-  LINK_SO = linkso + "; strip $@"
+  #linkso = Object.send :remove_const, "LINK_SO"
+  #LINK_SO = linkso + "; strip $@"
 
 else
   unless have_library('pthread')

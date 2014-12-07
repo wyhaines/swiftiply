@@ -9,7 +9,7 @@ require 'yaml'
 
 class TC_Swiftiply < Test::Unit::TestCase
 	@@testdir = SwiftcoreTestSupport.test_dir(__FILE__)
-	Ruby = File.join(::Config::CONFIG['bindir'],::Config::CONFIG['ruby_install_name']) << ::Config::CONFIG['EXEEXT']
+	Ruby = File.join(::RbConfig::CONFIG['bindir'],::RbConfig::CONFIG['ruby_install_name']) << ::RbConfig::CONFIG['EXEEXT']
 	
 	DeleteQueue = []
 	KillQueue = []
@@ -40,6 +40,7 @@ ECONF
 	def get_url_https(hostname, port, url)
 		http = Net::HTTP.new(hostname, port)
 		http.use_ssl = true
+                http.verify_mode = OpenSSL::SSL::VERIFY_NONE
 		http.start {http.request_get(url)}
 	end
 	
@@ -122,7 +123,7 @@ ECONF
 
 		# Normal request for a sanity check.
 		response = get_url('127.0.0.1',29998,'/xyzzy')
-		assert_equal("GET /xyzzy HTTP/1.1\r\nAccept: */*\r\nHost: 127.0.0.1:29998\r\n\r\n",response.body)
+		assert(response.body =~ /GET \/xyzzy HTTP\/1.1\r\n.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m, "Got #{response.body.inspect}, expected to match " + '/GET \/xyzzy HTTP\/1.1\r\n.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m')
 		
 		# Now rewrite the conf file to be a little different.
 		File.open(conf_file,'w+') {|fh| fh.write ConfBase.to_yaml }
@@ -130,6 +131,7 @@ ECONF
 		# Reload the config
 		Process.kill 'SIGHUP',swiftiply_pid
 		
+sleep(1)
 		# This request should pull the file from the docroot, since it the
 		# docroot was not deleted from the config that was just read.
 		response = get_url('127.0.0.1',29998,'/xyzzy')
@@ -495,6 +497,7 @@ ECONF
 			print '..'
 			STDOUT.flush
 			http = Net::HTTP.new('127.0.0.1',3333)
+                        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
 			http.use_ssl
 			http.start {http.request_get('/')}
 			puts '..'
@@ -640,28 +643,28 @@ ECONF
 		
 		# Normal request
 		response = get_url('127.0.0.1',29998,'/xyzzy')
-		assert_equal("GET /xyzzy HTTP/1.1\r\nAccept: */*\r\nHost: 127.0.0.1:29998\r\n\r\n",response.body)
+		assert(response.body =~ /GET \/xyzzy HTTP\/1.1\r\n.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m, "Got #{response.body.inspect}, expected to match " + '/GET \/xyzzy HTTP\/1.1\r\n.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m')
 		
 		# With query string params.
 		response = get_url('127.0.0.1',29998,'/foo/bar/bam?Q=1234')
-		assert_equal("GET /foo/bar/bam?Q=1234 HTTP/1.1\r\nAccept: */*\r\nHost: 127.0.0.1:29998\r\n\r\n",response.body)
+		assert(response.body =~ /GET \/foo\/bar\/bam\?Q=1234 HTTP\/1.1\r\n.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m, "Got #{response.body.inspect}, expected to match " + 'GET /foo/bar/bam?Q=1234 HTTP/1.1\r\n.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m')
 
 		# POST request
 		response = post_url('127.0.0.1',29998,'/xyzzy')
-		assert_equal("POST /xyzzy HTTP/1.1\r\nAccept: */*\r\nHost: 127.0.0.1:29998\r\n\r\n",response.body)
+		assert(response.body =~ /POST \/xyzzy HTTP\/1.1\r\n.*x-www-form-urlencoded\r\n\r\n/m, "Got #{response.body.inspect}, expected to match " + '/POST /xyzzy HTTP/1.1\r\n.*x-www-form-urlencoded\r\n\r\n/m')
 		
 		# And another verb; different verbs should be irrelevant
 		response = delete_url('127.0.0.1',29998,'/xyzzy')
-		assert_equal("DELETE /xyzzy HTTP/1.1\r\nAccept: */*\r\n",response.body[0..36])
+		assert(response.body =~ /DELETE \/xyzzy HTTP\/1.1\r\n.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m, "Got #{response.body.inspect}, expected to match " + 'DELETE /xyzzy HTTP/1.1\r\n.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m')
 		
 		# A non-matching hostname, to trigger default handling
 		response = get_url('localhost',29998,'/xyzzy')
-		assert_equal("GET /xyzzy HTTP/1.1\r\nAccept: */*\r\nHost: localhost:29998\r\n\r\n",response.body)
+		assert(response.body =~ /GET \/xyzzy HTTP\/1.1\r\n.*\r\nHost: localhost:29998\r\n\r\n/m, "Got #{response.body.inspect}, expected to match " + 'GET /xyzzy HTTP/1.1\r\n.*\r\nHost: localhost:29998\r\n\r\n/m')
 		
 		# A very large url
 		u = '/abcdefghijklmnopqrstuvwxyz'*100
 		response = get_url('127.0.0.1',29998,u)
-		assert_equal("GET #{u} HTTP/1.1\r\nAccept: */*\r\nHost: 127.0.0.1:29998\r\n\r\n",response.body)
+		assert(response.body =~ /GET #{u} HTTP\/1.1.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m, "Got #{response.body.inspect}, expected to match " + 'GET #{u} HTTP/1.1.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m')
 	end
 	
 	# Test redeployable requests.
@@ -702,7 +705,7 @@ ECONF
 		end
 
 		urlthread.join
-		assert_equal("GET /slo_gin_fizz HTTP/1.1\r\nAccept: */*\r\nHost: 127.0.0.1:29998\r\n\r\n",response.body)
+		assert(response.body =~ /GET \/slo_gin_fizz HTTP\/1.1\r\n.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m, "Got #{response.body.inspect}, expected to match " + 'GET /slo_gin_fizz HTTP/1.1\r\n.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m')
 		
 		sleep 1
 
@@ -771,7 +774,7 @@ ECONF
 		
 		# Normal request
 		response = get_url('127.0.0.1',29998,'/xyzzy')
-		assert_equal("GET /xyzzy HTTP/1.1\r\nAccept: */*\r\nHost: 127.0.0.1:29998\r\n\r\n",response.body)
+		assert(response.body =~ /GET \/xyzzy HTTP\/1.1\r\n.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m, "Got #{response.body.inspect}, expected to match " + '/GET \/xyzzy HTTP\/1.1\r\n.*\r\nHost: 127.0.0.1:29998\r\n\r\n/m')
 	end
 
 	def test_http_404_error
