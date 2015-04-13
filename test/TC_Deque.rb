@@ -6,7 +6,7 @@ require 'swiftcore/deque'
 
 class TC_Deque < Minitest::Test
 	@@testdir = SwiftcoreTestSupport.test_dir(__FILE__)
-	
+
 	def setup
 		Dir.chdir(@@testdir)
 		SwiftcoreTestSupport.announce(:proxybag,"ProxyBag")
@@ -31,7 +31,7 @@ class TC_Deque < Minitest::Test
 
 		assert_equal('["c","b","a"]',dq.inspect)
 	end
-	
+
 	def test_c_shift
 		dq = Swiftcore::Deque.new
 		dq.unshift "a"
@@ -109,7 +109,7 @@ class TC_Deque < Minitest::Test
 		dq.push "c"
 		assert_equal(["a","b","c"],dq.to_a)
 	end
-	
+
 	def test_l_first
 		dq = Swiftcore::Deque.new
 		dq.push "a"
