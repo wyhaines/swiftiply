@@ -1,10 +1,10 @@
-require 'test/unit'
+require 'minitest/autorun'
 require 'external/test_support'
 SwiftcoreTestSupport.set_src_dir
 require 'rbconfig'
 require 'swiftcore/deque'
 
-class TC_Deque < Test::Unit::TestCase
+class TC_Deque < Minitest::Test
 	@@testdir = SwiftcoreTestSupport.test_dir(__FILE__)
 	
 	def setup
@@ -18,20 +18,16 @@ class TC_Deque < Test::Unit::TestCase
 
 	def test_a_new
 		dq = nil
-		assert_nothing_raised do
-			dq = Swiftcore::Deque.new
-		end
+		dq = Swiftcore::Deque.new
 		assert_kind_of(Swiftcore::Deque,dq)
 	end
 
 	def test_b_unshift
 		dq = Swiftcore::Deque.new
 
-		assert_nothing_raised do
-			dq.unshift "a"
-			dq.unshift "b"
-			dq.unshift "c"
-		end
+		dq.unshift "a"
+		dq.unshift "b"
+		dq.unshift "c"
 
 		assert_equal('["c","b","a"]',dq.inspect)
 	end
@@ -49,11 +45,9 @@ class TC_Deque < Test::Unit::TestCase
 
 	def test_d_push
 		dq = Swiftcore::Deque.new
-		assert_nothing_raised do
-			dq.push "a"
-			dq.push "b"
-			dq.push "c"
-		end
+		dq.push "a"
+		dq.push "b"
+		dq.push "c"
 
 		assert_equal('["a","b","c"]',dq.inspect)
 	end
@@ -68,7 +62,7 @@ class TC_Deque < Test::Unit::TestCase
 		assert_equal("a",dq.pop)
 		assert_equal(nil,dq.pop)
 	end
-		
+
 	def test_f_size
 		dq = Swiftcore::Deque.new
 		dq.push "a"
@@ -79,9 +73,7 @@ class TC_Deque < Test::Unit::TestCase
 
 	def test_g_max_size
 		dq = Swiftcore::Deque.new
-		assert_nothing_raised do
-			dq.max_size
-		end
+		dq.max_size
 	end
 
 	def test_h_clear
@@ -89,9 +81,7 @@ class TC_Deque < Test::Unit::TestCase
 		dq.push "a"
 		dq.push "b"
 		dq.push "c"
-		assert_nothing_raised do
 			dq.clear
-		end
 		assert_equal(0,dq.size)
 		assert_equal("[]",dq.inspect)
 	end
