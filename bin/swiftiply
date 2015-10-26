@@ -1,4 +1,4 @@
-#!ruby
+#!/usr/local/rvm/rubies/ruby-1.8.7-p374/bin/ruby
 
 require 'optparse'
 require 'yaml'
@@ -86,7 +86,10 @@ module Swiftcore
 				end
 				opts.on('-v','--version','Show the version number, then exit.') do
 					puts "Swiftiply v. #{Swiftcore::Swiftiply::Version}"
-					exit
+					exit 0
+				end
+				opts.on('-f','--pid PIDFILE',"Path of the pid file to write.") do |pidfile|
+					config['pidfile'] = pidfile
 				end
 
 			end.parse!
@@ -96,21 +99,30 @@ module Swiftcore
 			fileconfig = YAML.load(File.open(config['config_file'])) if config['config_file']
 			config = fileconfig.merge(@cliconfig)
 			postprocess_config_load(config)
-			(puts("Configuration failed validation; exiting.") || exit) unless verify_config(config)
+			(puts("Configuration failed validation; exiting.") && exit(1)) unless verify_config(config)
 
 			if @print
 				require 'pp'
 				pp config
-				exit
+				exit 0
 			end
 			
 			config
 		end
 
-		def self.daemonize
+		def self.daemonize(pidfile = nil)
 			if (child_pid = fork)
-				puts "PID #{child_pid}"
-				exit!
+				if pidfile
+					begin
+						File.open(pidfile,"w+") {|fh| fh.puts "#{child_pid}"}
+					rescue Exception => e
+						puts "Failed to write PID file #{pidfile}\n#{e}\n\nPID #{child_pid}"
+					end
+				else
+					puts "PID #{child_pid}"
+				end
+
+				exit! 0
 			end
 
 			Process.setsid
@@ -142,7 +154,7 @@ module Swiftcore
 
 		def self.run
 			config = parse_options
-			daemonize if config[Cdaemonize]
+			daemonize(config['pidfile']) if config[Cdaemonize]
 			Swiftcore::Swiftiply.run(config)
 		end
 
@@ -154,3 +166,4 @@ module Swiftcore
 end
 
 Swiftcore::SwiftiplyExec.run
+exit 0
