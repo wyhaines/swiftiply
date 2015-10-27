@@ -1,36 +1,36 @@
-#!/usr/local/rvm/rubies/ruby-1.8.7-p374/bin/ruby
+#!ruby
 
 require 'optparse'
 require 'yaml'
 
 begin
-	load_attempted ||= false
-	require 'swiftcore/Swiftiply'
+  load_attempted ||= false
+  require 'swiftcore/Swiftiply'
 rescue LoadError => e
-	unless load_attempted
-		load_attempted = true
-		require 'rubygems'
-		retry
-	end
-	raise e
+  unless load_attempted
+    load_attempted = true
+    require 'rubygems'
+    retry
+  end
+  raise e
 end
 
 module Swiftcore
-	class SwiftiplyExec
-		Ccluster_address = 'cluster_address'.freeze
-		Ccluster_port = 'cluster_port'.freeze
-		Cconfig_file = 'config_file'.freeze
-		Cbackend_address = 'backend_address'.freeze
-		Cbackend_port = 'backend_port'.freeze
-		Cmap = 'map'.freeze
-		Cincoming = 'incoming'.freeze
-		Coutgoing = 'outgoing'.freeze
-		Ckeepalive = 'keepalive'.freeze
-		Cdaemonize = 'daemonize'.freeze
-		Curl = 'url'.freeze
-		Chost = 'host'.freeze
-		Cport = 'port'.freeze
-		Ctimeout = 'timeout'.freeze
+  class SwiftiplyExec
+    Ccluster_address = 'cluster_address'.freeze
+    Ccluster_port = 'cluster_port'.freeze
+    Cconfig_file = 'config_file'.freeze
+    Cbackend_address = 'backend_address'.freeze
+    Cbackend_port = 'backend_port'.freeze
+    Cmap = 'map'.freeze
+    Cincoming = 'incoming'.freeze
+    Coutgoing = 'outgoing'.freeze
+    Ckeepalive = 'keepalive'.freeze
+    Cdaemonize = 'daemonize'.freeze
+    Curl = 'url'.freeze
+    Chost = 'host'.freeze
+    Cport = 'port'.freeze
+    Ctimeout = 'timeout'.freeze
 
 #####
 #
@@ -49,120 +49,120 @@ module Swiftcore
 #     - 127.0.0.1:8080
 #     - foo.bar.com:8090
 #     url:
-#			keepalive:
-#			outgoing:
+#     keepalive:
+#     outgoing:
 # 
 #####
-		def self.parse_options
-			config = @cliconfig || {}
-			@print = false
-			
-			OptionParser.new do |opts|
-				opts.banner = 'Usage: swiftiply.rb [options]'
-				opts.separator ''
-				opts.on('-c','--config CONFFILE',"The configuration file to read.") do |conf|
-					config[Cconfig_file] = conf
-				end
-				opts.on('--cluster-address [ADDRESS]',String,'The hostname/IP address that swiftiply will listen for connections on.') do |address|
-					config[Ccluster_address] = address
-				end
-				opts.on('--cluster-port [PORT]',Integer,'The port that swiftiply will listen for connections on.') do |port|
-					config[Ccluster_port] = port
-				end
-				opts.on('--backend-address [ADDRESS]',String,'The hostname/IP address that swiftiply will listen for backend connections on.') do |address|
-					config[Cbackend_address] = address
-				end
-				opts.on('--backend-port [PORT]',Integer,'The port that swiftiply will listen for backend connections on.') do |port|
-					config[Cbackend_port] = port
-				end
-				opts.on('-d','--daemonize [YN]',[:y,:yes,:n,:no],'Whether swiftiply should put itself into the background.') do |yn|
-					config[Cdaemonize] = yn.to_s =~ /^y/i
-				end
-				opts.on('-t','--timeout [SECONDS]',Integer,'The server unavailable timeout.  Defaults to 3 seconds.') do |timeout|
-					config[Ctimeout] = timeout
-				end
-				opts.on('-p','--print-config','Print the full configuration.') do
-					@print = true
-				end
-				opts.on('-v','--version','Show the version number, then exit.') do
-					puts "Swiftiply v. #{Swiftcore::Swiftiply::Version}"
-					exit 0
-				end
-				opts.on('-f','--pid PIDFILE',"Path of the pid file to write.") do |pidfile|
-					config['pidfile'] = pidfile
-				end
+    def self.parse_options
+      config = @cliconfig || {}
+      @print = false
+      
+      OptionParser.new do |opts|
+        opts.banner = 'Usage: swiftiply.rb [options]'
+        opts.separator ''
+        opts.on('-c','--config CONFFILE',"The configuration file to read.") do |conf|
+          config[Cconfig_file] = conf
+        end
+        opts.on('--cluster-address [ADDRESS]',String,'The hostname/IP address that swiftiply will listen for connections on.') do |address|
+          config[Ccluster_address] = address
+        end
+        opts.on('--cluster-port [PORT]',Integer,'The port that swiftiply will listen for connections on.') do |port|
+          config[Ccluster_port] = port
+        end
+        opts.on('--backend-address [ADDRESS]',String,'The hostname/IP address that swiftiply will listen for backend connections on.') do |address|
+          config[Cbackend_address] = address
+        end
+        opts.on('--backend-port [PORT]',Integer,'The port that swiftiply will listen for backend connections on.') do |port|
+          config[Cbackend_port] = port
+        end
+        opts.on('-d','--daemonize [YN]',[:y,:yes,:n,:no],'Whether swiftiply should put itself into the background.') do |yn|
+          config[Cdaemonize] = yn.to_s =~ /^y/i
+        end
+        opts.on('-t','--timeout [SECONDS]',Integer,'The server unavailable timeout.  Defaults to 3 seconds.') do |timeout|
+          config[Ctimeout] = timeout
+        end
+        opts.on('-p','--print-config','Print the full configuration.') do
+          @print = true
+        end
+        opts.on('-v','--version','Show the version number, then exit.') do
+          puts "Swiftiply v. #{Swiftcore::Swiftiply::Version}"
+          exit 0
+        end
+        opts.on('-f','--pid PIDFILE',"Path of the pid file to write.") do |pidfile|
+          config['pidfile'] = pidfile
+        end
 
-			end.parse!
-			@cliconfig ||= config
-			
-			fileconfig = {}
-			fileconfig = YAML.load(File.open(config['config_file'])) if config['config_file']
-			config = fileconfig.merge(@cliconfig)
-			postprocess_config_load(config)
-			(puts("Configuration failed validation; exiting.") && exit(1)) unless verify_config(config)
+      end.parse!
+      @cliconfig ||= config
+      
+      fileconfig = {}
+      fileconfig = YAML.load(File.open(config['config_file'])) if config['config_file']
+      config = fileconfig.merge(@cliconfig)
+      postprocess_config_load(config)
+      (puts("Configuration failed validation; exiting.") && exit(1)) unless verify_config(config)
 
-			if @print
-				require 'pp'
-				pp config
-				exit 0
-			end
-			
-			config
-		end
+      if @print
+        require 'pp'
+        pp config
+        exit 0
+      end
+      
+      config
+    end
 
-		def self.daemonize(pidfile = nil)
-			if (child_pid = fork)
-				if pidfile
-					begin
-						File.open(pidfile,"w+") {|fh| fh.puts "#{child_pid}"}
-					rescue Exception => e
-						puts "Failed to write PID file #{pidfile}\n#{e}\n\nPID #{child_pid}"
-					end
-				else
-					puts "PID #{child_pid}"
-				end
+    def self.daemonize(pidfile = nil)
+      if (child_pid = fork)
+        if pidfile
+          begin
+            File.open(pidfile,"w+") {|fh| fh.puts "#{child_pid}"}
+          rescue Exception => e
+            puts "Failed to write PID file #{pidfile}\n#{e}\n\nPID #{child_pid}"
+          end
+        else
+          puts "PID #{child_pid}"
+        end
 
-				exit! 0
-			end
+        exit! 0
+      end
 
-			Process.setsid
+      Process.setsid
 
-		rescue Exception
-			puts "Platform (#{RUBY_PLATFORM}) does not appear to support fork/setsid; skipping"
-		end
+    rescue Exception
+      puts "Platform (#{RUBY_PLATFORM}) does not appear to support fork/setsid; skipping"
+    end
 
-		def self.postprocess_config_load(config)
-			config[Cmap] = [] unless Array === config[Cmap]
-			config[Ctimeout] ||= 3
-			config[Cmap].each do |m|
-				m[Ckeepalive] = true unless m.has_key?(Ckeepalive)
-				m[Ckeepalive] = !!m[Ckeepalive]
-				m[Coutgoing] = [m[Coutgoing]] unless Array === m[Coutgoing]
-				m[Cincoming] = [m[Cincoming]] unless Array === m[Cincoming]
-			end
-		end
+    def self.postprocess_config_load(config)
+      config[Cmap] = [] unless Array === config[Cmap]
+      config[Ctimeout] ||= 3
+      config[Cmap].each do |m|
+        m[Ckeepalive] = true unless m.has_key?(Ckeepalive)
+        m[Ckeepalive] = !!m[Ckeepalive]
+        m[Coutgoing] = [m[Coutgoing]] unless Array === m[Coutgoing]
+        m[Cincoming] = [m[Cincoming]] unless Array === m[Cincoming]
+      end
+    end
 
-		def self.verify_config(config)
-			return nil if config[Ccluster_address].nil?
-			return nil if config[Ccluster_port].nil?
+    def self.verify_config(config)
+      return nil if config[Ccluster_address].nil?
+      return nil if config[Ccluster_port].nil?
 
-			if config[Cbackend_address] and config[Cbackend_port]
-				config[Cmap] << {Cincoming => nil, Curl => nil, Coutgoing => "#{config[Cbackend_address]}:#{config[Cbackend_port]}", Ckeepalive => true}
-			end
-			true
-		end
+      if config[Cbackend_address] and config[Cbackend_port]
+        config[Cmap] << {Cincoming => nil, Curl => nil, Coutgoing => "#{config[Cbackend_address]}:#{config[Cbackend_port]}", Ckeepalive => true}
+      end
+      true
+    end
 
-		def self.run
-			config = parse_options
-			daemonize(config['pidfile']) if config[Cdaemonize]
-			Swiftcore::Swiftiply.run(config)
-		end
+    def self.run
+      config = parse_options
+      daemonize(config['pidfile']) if config[Cdaemonize]
+      Swiftcore::Swiftiply.run(config)
+    end
 
-		def self.on_windows?
-			return @on_windows unless @on_windows.nil?
-			@on_windows = !![/mswin/i, /cygwin/i, /mingw/i, /bccwin/i, /wince/i].find {|p| RUBY_PLATFORM =~ p}
-		end
-	end
+    def self.on_windows?
+      return @on_windows unless @on_windows.nil?
+      @on_windows = !![/mswin/i, /cygwin/i, /mingw/i, /bccwin/i, /wince/i].find {|p| RUBY_PLATFORM =~ p}
+    end
+  end
 end
 
 Swiftcore::SwiftiplyExec.run
