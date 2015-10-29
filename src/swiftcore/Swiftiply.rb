@@ -127,7 +127,7 @@ module Swiftcore
       EventMachine.set_descriptor_table_size(config[Cepoll_descriptors] || config[Cdescriptors] || 4096) rescue nil
 
       EventMachine.run do
-        EM.set_timer_quantum(100)
+        EM.set_timer_quantum(5)
         trap("HUP") {em_config(Swiftcore::SwiftiplyExec.parse_options); GC.start}
         trap("INT") {EventMachine.stop_event_loop}
         GC.start

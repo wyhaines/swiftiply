@@ -193,7 +193,7 @@ module Swiftcore
           if @headers_completed
             @associate.send_data data unless @dont_send_data
             @content_sent += data.length
-            if @content_length and @content_sent >= @content_length or data[-6..-1] == C0rnrn
+            if ( @content_length and @content_sent >= @content_length ) or data[-6..-1] == C0rnrn or @associate.request_method == CHEAD
               # If @dont_send_data is set, then the connection is going to be closed elsewhere.
               unless @dont_send_data
                 # Check to see if keepalive is enabled.
