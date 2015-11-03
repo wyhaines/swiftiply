@@ -11,6 +11,7 @@ module Swiftcore
 				@vw = vw
 				@tl = time_limit
 				@vwtl = vw * time_limit
+				@old_vql = 0
 				@vq = Deque.new
 				super()
 				self.max_size = maxsize
