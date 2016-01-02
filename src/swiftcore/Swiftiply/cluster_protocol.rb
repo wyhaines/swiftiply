@@ -27,7 +27,7 @@ module Swiftcore
       def send_503_response
         ip = Socket::unpack_sockaddr_in(get_peername).last rescue Cunknown_host
         error = "The request (#{@uri} --> #{@name}), received on #{create_time.asctime} from #{ip} timed out before being deployed to a server for processing."
-        send_data "#{C503Header}Server Unavailable\n\n#{error}"
+        send_data "#{C503Header}Server Unavailable\n\n#{error}".b
         ProxyBag.logger.log(Cinfo,"Server Unavailable -- #{error}")
         close_connection_after_writing
         increment_503_count
@@ -42,13 +42,13 @@ module Swiftcore
           unless @redeployable
             # normal data push
             data = nil
-            @associate.send_data data while data = @data.pop
+            @associate.send_data data.b while data = @data.pop
           else
             # redeployable data push; just send the stuff that has
             # not already been sent.
             (@data.length - 1 - @data_pos).downto(0) do |p|
               d = @data[p]
-              @associate.send_data d
+              @associate.send_data d.b
               @data_len += d.length
             end
             @data_pos = @data.length

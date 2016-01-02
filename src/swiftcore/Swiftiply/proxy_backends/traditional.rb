@@ -117,7 +117,8 @@ module Swiftcore
 				# here and the keepalive protocol. That funcationality need to be
 				# refactored so that it's encapsulated better.
 
-				def receive_data data
+				def receive_data _data
+					data = _data.b
 					unless @headers_completed 
 						if data.include?(Crnrn)
 							@headers_completed = true
@@ -149,15 +150,15 @@ module Swiftcore
 								else
 									if @enable_sendfile_404
 										msg = "#{@associate.uri} could not be found."
-										@associate.send_data "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nContent-Type: text/html\r\nContent-Length: #{msg.length}\r\n\r\n#{msg}"
+										@associate.send_data "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nContent-Type: text/html\r\nContent-Length: #{msg.length}\r\n\r\n#{msg}".b
 										@associate.close_connection_after_writing
 										@dont_send_data = true
 									else
-										@associate.send_data @headers + Crnrn
+										@associate.send_data (@headers + Crnrn).b
 									end
 								end
 							else
-								@associate.send_data @headers + Crnrn
+								@associate.send_data (@headers + Crnrn).b
 							end
 
 							# If keepalive is turned on, the assumption is that it will stay
@@ -176,7 +177,7 @@ module Swiftcore
 					end
 
 					if @headers_completed
-						@associate.send_data data unless @dont_send_data
+						@associate.send_data data.b unless @dont_send_data
 						@cacheable_data << data if @do_caching
 						@content_sent += data.length
 

@@ -13,7 +13,8 @@ module Swiftcore
         end
 
         class RestUpdaterProtocol < EventMachine::Connection
-          def receive_data data
+          def receive_data _data
+            data = d.b
 
           end
         end

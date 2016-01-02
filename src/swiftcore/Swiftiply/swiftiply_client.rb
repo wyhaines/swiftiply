@@ -50,7 +50,7 @@ class SwiftiplyClientProtocol < EventMachine::Connection
 	end
 	
 	def connection_completed
-		send_data @id
+		send_data @id.b
 	end
 
 	def unbind
@@ -62,7 +62,7 @@ class SwiftiplyClientProtocol < EventMachine::Connection
 		headers[CContentLength] = data.length
 		header_string = ''
 		headers.each {|k,v| header_string << "#{k}: #{v}\r\n"}
-		send_data("HTTP/1.1 #{status} #{msg}\r\n#{header_string}\r\n#{data}")
+		send_data("HTTP/1.1 #{status} #{msg}\r\n#{header_string}\r\n#{data}").b
 	end
 	
 	def __get_ip hostname

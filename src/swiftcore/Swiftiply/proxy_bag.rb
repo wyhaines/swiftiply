@@ -365,16 +365,16 @@ module Swiftcore
                 else none_match
                 end 
               if same_response
-                clnt.send_data "#{C_304}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}"
+                clnt.send_data "#{C_304}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}".b
                 owner_hash = filecache.owner_hash
                 log(owner_hash).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 304 -") if level(owner_hash) > 1
               else
                 unless request_method == CHEAD
-                  clnt.send_data "#{data.last}#{clnt.connection_header}#{@dateheader}#{data.first}"
+                  clnt.send_data "#{data.last}#{clnt.connection_header}#{@dateheader}#{data.first}".b
                   owner_hash = filecache.owner_hash
                   log(owner_hash).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"GET #{path_info} HTTP/#{clnt.http_version}\" 200 #{data.first.length}") if level(owner_hash) > 1
                 else
-                  clnt.send_data "#{data.last}#{clnt.connection_header}#{@dateheader}"
+                  clnt.send_data "#{data.last}#{clnt.connection_header}#{@dateheader}".b
                   owner_hash = filecache.owner_hash
                   log(owner_hash).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"HEAD #{path_info} HTTP/#{clnt.http_version}\" 200 -") if level(owner_hash) > 1
                 end
@@ -407,7 +407,7 @@ module Swiftcore
               end
 
               if same_response
-                clnt.send_data "#{C_304}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}"
+                clnt.send_data "#{C_304}#{clnt.connection_header}Content-Length: 0\r\n#{@dateheader}".b
 
                 unless clnt.keepalive
                   clnt.close_connection_after_writing
@@ -426,12 +426,12 @@ module Swiftcore
                 fd = nil
                 if fsize < @chunked_encoding_threshold
                   File.open(path) {|fh| fd = fh.sysread(fsize)}
-                  clnt.send_data "#{header_line}#{clnt.connection_header}#{@dateheader}"
+                  clnt.send_data "#{header_line}#{clnt.connection_header}#{@dateheader}".b
                   unless request_method == CHEAD
                     if fsize < 32768
                       clnt.send_file_data path
                     else
-                      clnt.send_data fd
+                      clnt.send_data fd.b
                     end
                   end
 
@@ -442,10 +442,10 @@ module Swiftcore
                   end
 
                 elsif clnt.http_version != C1_0 && fsize > @chunked_encoding_threshold
-                  clnt.send_data "HTTP/1.1 200 OK\r\n#{clnt.connection_header}ETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\nTransfer-Encoding: chunked\r\n#{@dateheader}"
+                  clnt.send_data "HTTP/1.1 200 OK\r\n#{clnt.connection_header}ETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\nTransfer-Encoding: chunked\r\n#{@dateheader}".b
                   EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing} unless request_method == CHEAD
                 else
-                  clnt.send_data "#{header_line}#{clnt.connection_header}#{@dateheader}"
+                  clnt.send_data "#{header_line}#{clnt.connection_header}#{@dateheader}".b
                   EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>false)) {clnt.close_connection_after_writing} unless request_method == CHEAD
                 end
 
