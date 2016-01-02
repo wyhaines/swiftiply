@@ -1,3 +1,5 @@
+# Encoding:ascii-8bit
+
 require 'swiftcore/Swiftiply/config'
 # Standard style proxy.
 module Swiftcore
@@ -117,8 +119,7 @@ module Swiftcore
         # encoding.  Otherwise be paranoid; something isn't the way we like
         # it to be.
 
-        def receive_data _data
-          data = _data.b
+        def receive_data data
           unless @initialized
             # preamble = data.slice!(0..24)
             preamble = data[0..24]
@@ -165,15 +166,15 @@ module Swiftcore
                 else
                   if @enable_sendfile_404
                     msg = "#{@associate.uri} could not be found."
-                    @associate.send_data "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nContent-Type: text/html\r\nContent-Length: #{msg.length}\r\n\r\n#{msg}".b
+                    @associate.send_data "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nContent-Type: text/html\r\nContent-Length: #{msg.length}\r\n\r\n#{msg}"
                     @associate.close_connection_after_writing
                     @dont_send_data = true
                   else
-                    @associate.send_data (@headers + Crnrn).b
+                    @associate.send_data (@headers + Crnrn)
                   end
                 end
               else
-                @associate.send_data (@headers + Crnrn).b
+                @associate.send_data (@headers + Crnrn)
               end
 
               # If keepalive is turned on, the assumption is that it will stay
@@ -192,7 +193,7 @@ module Swiftcore
           end
 
           if @headers_completed
-            @associate.send_data data.b unless @dont_send_data
+            @associate.send_data data unless @dont_send_data
             @content_sent += data.length
             if ( @content_length and @content_sent >= @content_length ) or data[-6..-1] == C0rnrn or @associate.request_method == CHEAD
               # If @dont_send_data is set, then the connection is going to be closed elsewhere.

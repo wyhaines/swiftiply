@@ -1,4 +1,5 @@
-# -*- coding: ISO-8859-1 -*-
+# Encoding:ascii-8bit
+
 begin
 	load_attempted ||= false
 	require 'eventmachine'
@@ -50,7 +51,7 @@ class SwiftiplyClientProtocol < EventMachine::Connection
 	end
 	
 	def connection_completed
-		send_data @id.b
+		send_data @id
 	end
 
 	def unbind
@@ -62,7 +63,7 @@ class SwiftiplyClientProtocol < EventMachine::Connection
 		headers[CContentLength] = data.length
 		header_string = ''
 		headers.each {|k,v| header_string << "#{k}: #{v}\r\n"}
-		send_data("HTTP/1.1 #{status} #{msg}\r\n#{header_string}\r\n#{data}").b
+		send_data("HTTP/1.1 #{status} #{msg}\r\n#{header_string}\r\n#{data}")
 	end
 	
 	def __get_ip hostname

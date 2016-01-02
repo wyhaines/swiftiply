@@ -1,3 +1,5 @@
+# Encoding:ascii-8bit
+
 module Swiftcore
   module Swiftiply
     class Config
@@ -13,8 +15,7 @@ module Swiftcore
         end
 
         class RestUpdaterProtocol < EventMachine::Connection
-          def receive_data _data
-            data = d.b
+          def receive_data data
 
           end
         end

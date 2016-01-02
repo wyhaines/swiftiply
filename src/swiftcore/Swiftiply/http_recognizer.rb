@@ -1,3 +1,5 @@
+# Encoding:ascii-8bit
+
 require "swiftcore/Swiftiply/constants"
 
 module Swiftcore
@@ -65,8 +67,7 @@ module Swiftcore
       # \r\n\r\n
       #   If-None-Match
       # Done Parsing
-      def receive_data _data
-        data = _data.b
+      def receive_data data
         if @done_parsing
           @data.unshift data
           push
@@ -208,7 +209,7 @@ module Swiftcore
       def send_400_response
         ip = Socket::unpack_sockaddr_in(get_peername).last rescue Cunknown_host
         error = "The request received on #{ProxyBag.now.asctime} from #{ip} was malformed and could not be serviced."
-        send_data "#{C400Header}Bad Request\n\n#{error}".b
+        send_data "#{C400Header}Bad Request\n\n#{error}"
         ProxyBag.logger.log(Cinfo,"Bad Request -- #{error}")
         close_connection_after_writing
         increment_400_count
@@ -220,7 +221,7 @@ module Swiftcore
       def send_404_response
         ip = Socket::unpack_sockaddr_in(get_peername).last rescue Cunknown_host
         error = "The request (#{@uri} --> #{@name}), received on #{ProxyBag.now.asctime} from #{ip} did not match any resource know to this server."
-        send_data "#{C404Header}Resource not found.\n\n#{error}".b
+        send_data "#{C404Header}Resource not found.\n\n#{error}"
         ProxyBag.logger.log(Cinfo,"Resource not found -- #{error}")
         close_connection_after_writing
         increment_404_count
