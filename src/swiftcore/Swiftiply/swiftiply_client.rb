@@ -1,4 +1,5 @@
-# -*- coding: ISO-8859-1 -*-
+# Encoding:ascii-8bit
+
 begin
 	load_attempted ||= false
 	require 'eventmachine'

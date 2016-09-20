@@ -1,3 +1,5 @@
+# Encoding:ascii-8bit
+
 require "swiftcore/Swiftiply/constants"
 
 module Swiftcore

@@ -1,3 +1,5 @@
+# Encoding:ascii-8bit
+
 module Swiftcore
   module Swiftiply
 
@@ -307,7 +309,7 @@ module Swiftcore
         end
 
         def chunked_encoding_threshold=(val)
-          @chunked_encoding_threshold = val > 32768 ? 32768 : val         
+          @chunked_encoding_threshold = val > 10485760 ? 10485760 : val         
         end
 
         def cache_threshold
@@ -442,7 +444,7 @@ module Swiftcore
                   end
 
                 elsif clnt.http_version != C1_0 && fsize > @chunked_encoding_threshold
-                  clnt.send_data "HTTP/1.1 200 OK\r\n#{clnt.connection_header}ETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\nTransfer-Encoding: chunked\r\n#{@dateheader}"
+                  clnt.send_data "HTTP/1.1 200 OK\r\n#{clnt.connection_header}ETag: #{etag}\r\nContent-Type: #{ct}\r\nTransfer-Encoding: chunked\r\n#{@dateheader}"
                   EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>true)) {clnt.close_connection_after_writing} unless request_method == CHEAD
                 else
                   clnt.send_data "#{header_line}#{clnt.connection_header}#{@dateheader}"
