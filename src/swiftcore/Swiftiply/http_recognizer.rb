@@ -1,6 +1,6 @@
 # Encoding:ascii-8bit
 
-require 'uri'
+require 'cgi'
 require "swiftcore/Swiftiply/constants"
 
 module Swiftcore
@@ -221,7 +221,7 @@ module Swiftcore
 
       def send_404_response
         ip = Socket::unpack_sockaddr_in(get_peername).last rescue Cunknown_host
-        error = "The request (#{URI.encode( @uri )} --> #{@name}), received on #{ProxyBag.now.asctime} from #{ip} did not match any resource know to this server."
+        error = CGI::encodeHTML "The request (#{ @uri } --> #{@name}), received on #{ProxyBag.now.asctime} from #{ip} did not match any resource know to this server."
         send_data "#{C404Header}Resource not found.\n\n#{error}"
         ProxyBag.logger.log(Cinfo,"Resource not found -- #{error}")
         close_connection_after_writing
