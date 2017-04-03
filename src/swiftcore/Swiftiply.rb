@@ -262,6 +262,7 @@ EOC
       # if the client supports HTTP 1.1.  Generally there is no reason
       # to change this, but it is configurable.
 
+puts "CHUNKED ENCODING THRESHOLD: #{config[Cchunked_encoding_threshold] || 16384}"
       ProxyBag.chunked_encoding_threshold = config[Cchunked_encoding_threshold] || 16384
 
       # The default cache_threshold is set to 100k.  Files above this size

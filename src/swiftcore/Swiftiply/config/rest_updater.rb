@@ -1,3 +1,5 @@
+# Encoding:ascii-8bit
+
 module Swiftcore
   module Swiftiply
     class Config
