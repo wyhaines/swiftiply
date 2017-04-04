@@ -85,7 +85,7 @@ module Swiftcore
           @print = true
         end
         opts.on('-v','--version','Show the version number, then exit.') do
-          puts "Swiftiply v. #{Swiftcore::Swiftiply::Version}"
+          puts "Swiftiply v. #{Swiftcore::Swiftiply::VERSION}"
           exit 0
         end
         opts.on('-f','--pid PIDFILE',"Path of the pid file to write.") do |pidfile|

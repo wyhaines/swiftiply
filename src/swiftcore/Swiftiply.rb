@@ -51,6 +51,7 @@ module Swiftcore
     require 'swiftcore/hash'
     require 'swiftcore/types'
     require 'swiftcore/Swiftiply/mocklog'
+    require 'swiftcore/Swiftiply/version'
 
     load_state = :deque
     require 'swiftcore/deque' unless const_defined?(:HasDeque)
