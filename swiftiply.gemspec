@@ -23,14 +23,14 @@ spec = Gem::Specification.new do |s|
   s.rdoc_options      = %w(--title Swiftcore::Swiftiply --main README.md --line-numbers)
   s.extra_rdoc_files  = %w(README.md)
   s.extensions        << 'ext/fastfilereader/extconf.rb'
-	s.extensions        << 'ext/deque/extconf.rb'
-	s.extensions        << 'ext/splaytree/extconf.rb'
+  s.extensions        << 'ext/deque/extconf.rb'
+  s.extensions        << 'ext/splaytree/extconf.rb'
   s.files             = Dir['**/*']
-	s.executables = %w(swiftiply swiftiplied_mongrel_rails evented_mongrel_rails swiftiply_mongrel_rails)
-	s.require_paths = %w(src)
+  s.executables = %w(swiftiply swiftiplied_mongrel_rails evented_mongrel_rails swiftiply_mongrel_rails)
+  s.require_paths = %w(src)
 
-	s.requirements      << "Eventmachine 0.8.1 or higher."
-	s.add_dependency('eventmachine','>= 0.8.1')
+  s.requirements      << "Eventmachine 0.8.1 or higher."
+  s.add_dependency('eventmachine','>= 0.8.1')
   s.test_files = []
 
   s.rubyforge_project = %q(swiftiply)
