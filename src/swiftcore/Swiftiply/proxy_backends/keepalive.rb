@@ -1,5 +1,3 @@
-# Encoding:ascii-8bit
-
 require 'swiftcore/Swiftiply/config'
 # Standard style proxy.
 module Swiftcore
@@ -170,11 +168,11 @@ module Swiftcore
                     @associate.close_connection_after_writing
                     @dont_send_data = true
                   else
-                    @associate.send_data (@headers + Crnrn)
+                    @associate.send_data @headers + Crnrn
                   end
                 end
               else
-                @associate.send_data (@headers + Crnrn)
+                @associate.send_data @headers + Crnrn
               end
 
               # If keepalive is turned on, the assumption is that it will stay

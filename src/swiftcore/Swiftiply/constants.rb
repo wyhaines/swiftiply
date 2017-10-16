@@ -3,6 +3,7 @@ module Swiftcore
   Deque = Array unless HasDeque or const_defined?(:Deque)
   
   module Swiftiply
+    Version = '1.1.0'
 
     # Yeah, these constants look kind of tacky.  Inside of tight loops,
     # though, using them makes a small but measurable difference, and those
@@ -55,6 +56,7 @@ module Swiftcore
     CGET = 'GET'.freeze
     Cgroup = 'group'.freeze
     CHEAD = 'HEAD'.freeze
+    Chealth_check_uri = 'health_check_uri'.freeze
     Chost = 'host'.freeze
     Cincoming = 'incoming'.freeze
     Cinfo = 'info'.freeze

@@ -39,6 +39,14 @@ module Swiftcore
         @klass.increment_503_count
       end
 
+      def send_healthcheck_response
+        ip = Socket::unpack_sockaddr_in(get_peername).last rescue Cunknown_host
+        message = "Health request from #{ip} at #{ProxyBag.now.asctime}\n400:#{@count_400}\n404:#{@count_404}\n503:#{@count_503}\n"
+        send_data "#{C200Header}#{message}"
+        ProxyBag.logger.log(Cinfo,"healthcheck from ##{ip}")
+        close_connection_after_writing
+      end
+
       def push
         if @associate
           unless @redeployable

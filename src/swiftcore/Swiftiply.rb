@@ -51,7 +51,6 @@ module Swiftcore
     require 'swiftcore/hash'
     require 'swiftcore/types'
     require 'swiftcore/Swiftiply/mocklog'
-    require 'swiftcore/Swiftiply/version'
 
     load_state = :deque
     require 'swiftcore/deque' unless const_defined?(:HasDeque)
@@ -263,8 +262,9 @@ EOC
       # if the client supports HTTP 1.1.  Generally there is no reason
       # to change this, but it is configurable.
 
-puts "CHUNKED ENCODING THRESHOLD: #{config[Cchunked_encoding_threshold] || 16384}"
       ProxyBag.chunked_encoding_threshold = config[Cchunked_encoding_threshold] || 16384
+
+      ProxyBag.health_check_uri = config[Chealth_check_uri] || '/swiftiply_health'
 
       # The default cache_threshold is set to 100k.  Files above this size
       # will not be cached.  Customize this value in your configurations

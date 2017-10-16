@@ -20,8 +20,9 @@ module Swiftcore
       C_blank = ''.freeze
       C_percent = '%'.freeze
       Cunknown_host = 'unknown host'.freeze
-      C404Header = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
-      C400Header = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
+      C200Header = "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
+      C404Header = "HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
+      C400Header = "HTTP/1.0 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
 
       def self.proxy_bag_class_is klass
         const_set(:ProxyBag, klass)
@@ -195,6 +196,8 @@ module Swiftcore
               
               # THIS IS BROKEN; the interaction of @data, data, and add_frontend_client needs to be revised
               ProxyBag.add_frontend_client(self,@data,data)
+            elsif @uri == ProxyBag.health_check_uri
+              send_healthcheck_response
             else
               send_404_response
             end           
@@ -221,13 +224,21 @@ module Swiftcore
 
       def send_404_response
         ip = Socket::unpack_sockaddr_in(get_peername).last rescue Cunknown_host
-        error = CGI.escapeHTML "The request (#{ @uri } --> #{@name}), received on #{ProxyBag.now.asctime} from #{ip} did not match any resource know to this server."
+        error = "The request (#{ CGI::escapeHTML( @uri ) } --> #{@name}), received on #{ProxyBag.now.asctime} from #{ip} did not match any resource know to this server."
         send_data "#{C404Header}Resource not found.\n\n#{error}"
         ProxyBag.logger.log(Cinfo,"Resource not found -- #{error}")
         close_connection_after_writing
         increment_404_count
       end
   
+      def send_healthcheck_response
+        ip = Socket::unpack_sockaddr_in(get_peername).last rescue Cunknown_host
+        message = "Health request from #{ip} at #{ProxyBag.now.asctime}\n400:#{@count_400}\n404:#{@count_404}\n\n"
+        send_data "#{C200Header}#{message}"
+        ProxyBag.logger.log(Cinfo,"healthcheck from ##{ip}")
+        close_connection_after_writing
+      end
+
       # The push method pushes data from the HttpRecognizer to whatever
       # entity is responsible for handling it. You MUST override this with
       # something useful.

@@ -1,4 +1,4 @@
-# Encoding:ascii-8bit
+# encoding: ASCII-8BIT
 
 module Swiftcore
   module Swiftiply
@@ -282,6 +282,14 @@ module Swiftcore
           @default_name = val
         end
 
+        def health_check_uri
+          @health_check_uri
+        end
+
+        def health_check_uri=(val)
+          @health_check_uri = val
+        end
+
         # This timeout is the amount of time a connection will sit in queue
         # waiting for a backend to process it.  A client connection that
         # sits for longer than this timeout receives a 503 response and
@@ -347,6 +355,7 @@ module Swiftcore
         # This code is damn ugly.
 
         def serve_static_file(clnt,docroot = nil)
+          Encoding::default_external = 'ASCII-8BIT'
           request_method = clnt.request_method
 
           # Only GET and HEAD requests can return a file.
@@ -424,10 +433,9 @@ module Swiftcore
                 fsize = File.size(path)
 
                 header_line = "HTTP/1.1 200 OK\r\nETag: #{etag}\r\nContent-Type: #{ct}\r\nContent-Length: #{fsize}\r\n"
-
                 fd = nil
                 if fsize < @chunked_encoding_threshold
-                  File.open(path) {|fh| fd = fh.sysread(fsize)}
+                  File.open(path,'r:ASCII-8BIT') {|fh| fd = fh.sysread(fsize)}
                   clnt.send_data "#{header_line}#{clnt.connection_header}#{@dateheader}"
                   unless request_method == CHEAD
                     if fsize < 32768
@@ -451,7 +459,7 @@ module Swiftcore
                   EM::Deferrable.future(clnt.stream_file_data(path, :http_chunks=>false)) {clnt.close_connection_after_writing} unless request_method == CHEAD
                 end
 
-                filecache.add(path_info, path, fd || File.read(path),etag,mtime,nil,header_line) if fsize < @cache_threshold
+                filecache.add(path_info, path, fd || File.read(path, mode: 'rb', encoding: 'ASCII-8BIT'),etag,mtime,nil,header_line) if fsize < @cache_threshold
 
                 owner_hash = filecache.owner_hash
                 log(owner_hash).log(Cinfo,"#{Socket::unpack_sockaddr_in(clnt.get_peername || UnknownSocket).last} \"#{request_method} #{path_info} HTTP/#{clnt.http_version}\" 200 #{request_method == CHEAD ? C_empty : fsize}") if level(owner_hash) > 1
